@@ -1,6 +1,6 @@
 # KrillinAI
 
-Video dubbing and subtitle engine written in Rust. Automatically transcribes, translates, and dubs videos with support for fully on-device processing on Apple Silicon via MLX.
+Video dubbing and subtitle engine written in Rust. Automatically transcribes, translates, and dubs videos with support for fully on-device processing on Apple Silicon via MLX. All ASR and TTS providers are free and local.
 
 ## Features
 
@@ -8,8 +8,8 @@ Video dubbing and subtitle engine written in Rust. Automatically transcribes, tr
 - **Auto language detection**: Whisper detects the source language; EN↔RU translation selected automatically
 - **Multi-track audio**: Dubbed audio added as a second track with language metadata (original preserved)
 - **yt-dlp integration**: Paste a YouTube URL, get a dubbed `.mp4` back
-- **Multiple ASR backends**: OpenAI Whisper API, whisper.cpp, WhisperKit, faster-whisper, MLX Whisper, Aliyun
-- **Multiple TTS backends**: OpenAI TTS, Edge TTS, MLX Audio (Kokoro), Aliyun
+- **Free ASR backends**: faster-whisper, whisper.cpp, WhisperKit, MLX Whisper
+- **Free TTS backends**: Edge TTS, MLX Audio (Kokoro)
 - **Any OpenAI-compatible LLM**: OpenAI, DeepSeek, local `mlx_lm.server`
 - **On-device Apple Silicon**: MLX Whisper + MLX Audio + local LLM = zero cloud dependencies
 - **Web UI**: Built-in browser interface at `http://localhost:8888`
@@ -20,9 +20,8 @@ Video dubbing and subtitle engine written in Rust. Automatically transcribes, tr
 - Rust 1.75+
 - ffmpeg / ffprobe
 - yt-dlp (for URL downloads)
-
-Optional (for on-device processing on macOS):
-- `pip install mlx-whisper mlx-audio mlx-lm`
+- One ASR backend installed (faster-whisper, whisper.cpp, WhisperKit, or mlx-whisper)
+- One TTS backend installed (edge-tts or mlx-audio)
 
 ## Quick Start
 
@@ -34,7 +33,7 @@ cargo build --release
 
 # Copy and edit config
 cp config/config-example.toml config/config.toml
-# Edit config/config.toml with your API keys or MLX settings
+# Edit config/config.toml — defaults to faster-whisper + edge-tts
 
 # Run
 ./target/release/krillin_rs
@@ -99,23 +98,19 @@ Leave `origin_language` empty for auto-detection. Leave `target_language` empty 
 
 ## Providers
 
-### Transcription (ASR)
+### Transcription (ASR) — all free, local
 | Provider | Config value | Notes |
 |----------|-------------|-------|
-| OpenAI Whisper API | `openai` | Cloud, requires API key |
-| faster-whisper | `fasterwhisper` | Local, Python |
+| faster-whisper | `fasterwhisper` | Local, Python, default |
 | whisper.cpp | `whispercpp` | Local, C++ |
 | WhisperKit | `whisperkit` | macOS only, CoreML |
 | MLX Whisper | `mlx-whisper` | macOS only, Metal GPU |
-| Aliyun | `aliyun` | Cloud, Chinese market |
 
-### Text-to-Speech
+### Text-to-Speech — all free, local
 | Provider | Config value | Notes |
 |----------|-------------|-------|
-| OpenAI TTS | `openai` | Cloud, requires API key |
-| Edge TTS | `edge-tts` | Free, Microsoft voices |
+| Edge TTS | `edge-tts` | Free, Microsoft voices, default |
 | MLX Audio (Kokoro) | `mlx-audio` | macOS only, 82M params |
-| Aliyun | `aliyun` | Cloud, Chinese market |
 
 ### Translation LLM
 Any OpenAI-compatible API. Point `llm.base_url` at your provider.
@@ -128,8 +123,7 @@ src/
   dto/          # API request/response types
   handler/      # Axum HTTP handlers
   provider/     # ASR, TTS, LLM provider implementations
-    openai/     # OpenAI Whisper, TTS, Chat
-    aliyun/     # Aliyun ASR, TTS, OSS
+    openai/     # OpenAI-compatible Chat (for translation LLM)
     local/      # whisper.cpp, WhisperKit, faster-whisper,
                 # edge-tts, MLX Whisper, MLX Audio
   service/      # Pipeline steps (split, transcribe, translate, TTS, embed)

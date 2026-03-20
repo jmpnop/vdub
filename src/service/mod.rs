@@ -34,7 +34,7 @@ impl Service {
             Some(config.app.proxy.as_str())
         };
 
-        // Transcriber — exhaustive match on enum
+        // Transcriber — all free/local providers
         let transcriber: Arc<dyn Transcriber> = match config.transcribe.provider {
             TranscribeProvider::Fasterwhisper => Arc::new(FasterWhisperProcessor::new(
                 &bins.fasterwhisper,
@@ -57,43 +57,16 @@ impl Service {
             }
             #[cfg(not(target_os = "macos"))]
             TranscribeProvider::MlxWhisper => {
-                tracing::warn!("⚠️  MLX Whisper not available on this platform, falling back to OpenAI");
-                Arc::new(OpenAiClient::new(
-                    &config.transcribe.openai.base_url,
-                    if config.transcribe.openai.api_key.is_empty() {
-                        &config.llm.api_key
-                    } else {
-                        &config.transcribe.openai.api_key
-                    },
-                    &config.transcribe.openai.model,
-                    proxy,
+                tracing::warn!("⚠️  MLX Whisper not available on this platform, falling back to faster-whisper");
+                Arc::new(FasterWhisperProcessor::new(
+                    &bins.fasterwhisper,
+                    &config.transcribe.fasterwhisper.model,
+                    config.transcribe.enable_gpu_acceleration,
                 ))
             }
-            TranscribeProvider::Aliyun => {
-                let speech = &config.transcribe.aliyun.speech;
-                let oss = &config.transcribe.aliyun.oss;
-                Arc::new(crate::provider::aliyun::asr::AliyunAsrClient::new(
-                    &speech.access_key_id,
-                    &speech.access_key_secret,
-                    &speech.app_key,
-                    &oss.bucket,
-                    &oss.access_key_id,
-                    &oss.access_key_secret,
-                ))
-            }
-            TranscribeProvider::Openai => Arc::new(OpenAiClient::new(
-                &config.transcribe.openai.base_url,
-                if config.transcribe.openai.api_key.is_empty() {
-                    &config.llm.api_key
-                } else {
-                    &config.transcribe.openai.api_key
-                },
-                &config.transcribe.openai.model,
-                proxy,
-            )),
         };
 
-        // Chat completer (always OpenAI-compatible — works with mlx_lm.server too)
+        // Chat completer (any OpenAI-compatible API — works with mlx_lm.server too)
         let chat_completer: Arc<dyn ChatCompleter> = Arc::new(OpenAiClient::new(
             &config.llm.base_url,
             &config.llm.api_key,
@@ -101,17 +74,9 @@ impl Service {
             proxy,
         ));
 
-        // TTS — exhaustive match on enum
+        // TTS — all free/local providers
         let tts_client: Arc<dyn Ttser> = match config.tts.provider {
             TtsProvider::EdgeTts => Arc::new(EdgeTtsClient::new(&bins.edge_tts)),
-            TtsProvider::Aliyun => {
-                let speech = &config.tts.aliyun.speech;
-                Arc::new(crate::provider::aliyun::tts::AliyunTtsClient::new(
-                    &speech.access_key_id,
-                    &speech.access_key_secret,
-                    &speech.app_key,
-                ))
-            }
             #[cfg(target_os = "macos")]
             TtsProvider::MlxAudio => {
                 Arc::new(crate::provider::local::mlx_audio::MlxAudioClient::new(
@@ -121,28 +86,9 @@ impl Service {
             }
             #[cfg(not(target_os = "macos"))]
             TtsProvider::MlxAudio => {
-                tracing::warn!("⚠️  MLX Audio not available on this platform, falling back to OpenAI");
-                Arc::new(OpenAiClient::new(
-                    &config.tts.openai.base_url,
-                    if config.tts.openai.api_key.is_empty() {
-                        &config.llm.api_key
-                    } else {
-                        &config.tts.openai.api_key
-                    },
-                    &config.tts.openai.model,
-                    proxy,
-                ))
+                tracing::warn!("⚠️  MLX Audio not available on this platform, falling back to Edge TTS");
+                Arc::new(EdgeTtsClient::new(&bins.edge_tts))
             }
-            TtsProvider::Openai => Arc::new(OpenAiClient::new(
-                &config.tts.openai.base_url,
-                if config.tts.openai.api_key.is_empty() {
-                    &config.llm.api_key
-                } else {
-                    &config.tts.openai.api_key
-                },
-                &config.tts.openai.model,
-                proxy,
-            )),
         };
 
         Self {

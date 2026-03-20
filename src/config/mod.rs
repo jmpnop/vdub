@@ -17,18 +17,16 @@ pub struct Config {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Provider Enums — type-safe, exhaustive matching
+// Provider Enums — free/local providers only
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscribeProvider {
     #[default]
-    Openai,
     Fasterwhisper,
     Whisperkit,
     Whispercpp,
-    Aliyun,
     #[serde(rename = "mlx-whisper")]
     MlxWhisper,
 }
@@ -37,8 +35,6 @@ pub enum TranscribeProvider {
 #[serde(rename_all = "lowercase")]
 pub enum TtsProvider {
     #[default]
-    Openai,
-    Aliyun,
     #[serde(rename = "edge-tts")]
     EdgeTts,
     #[serde(rename = "mlx-audio")]
@@ -99,42 +95,6 @@ pub struct LocalModelConfig {
     pub model: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AliyunSpeechConfig {
-    #[serde(default)]
-    pub access_key_id: String,
-    #[serde(default)]
-    pub access_key_secret: String,
-    #[serde(default)]
-    pub app_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AliyunOssConfig {
-    #[serde(default)]
-    pub access_key_id: String,
-    #[serde(default)]
-    pub access_key_secret: String,
-    #[serde(default)]
-    pub bucket: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AliyunTranscribeConfig {
-    #[serde(default)]
-    pub oss: AliyunOssConfig,
-    #[serde(default)]
-    pub speech: AliyunSpeechConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AliyunTtsConfig {
-    #[serde(default)]
-    pub oss: AliyunOssConfig,
-    #[serde(default)]
-    pub speech: AliyunSpeechConfig,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MlxWhisperConfig {
     #[serde(default = "default_mlx_whisper_model")]
@@ -155,8 +115,6 @@ pub struct TranscribeConfig {
     pub provider: TranscribeProvider,
     #[serde(default)]
     pub enable_gpu_acceleration: bool,
-    #[serde(default = "default_openai_transcribe")]
-    pub openai: OpenaiCompatibleConfig,
     #[serde(default = "default_local_model")]
     pub fasterwhisper: LocalModelConfig,
     #[serde(default = "default_local_model")]
@@ -164,19 +122,13 @@ pub struct TranscribeConfig {
     #[serde(default = "default_local_model")]
     pub whispercpp: LocalModelConfig,
     #[serde(default)]
-    pub aliyun: AliyunTranscribeConfig,
-    #[serde(default)]
     pub mlx_whisper: MlxWhisperConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TtsConfig {
     #[serde(default)]
     pub provider: TtsProvider,
-    #[serde(default = "default_openai_tts")]
-    pub openai: OpenaiCompatibleConfig,
-    #[serde(default)]
-    pub aliyun: AliyunTtsConfig,
     #[serde(default)]
     pub mlx_audio: MlxAudioConfig,
 }
@@ -196,23 +148,9 @@ fn default_port() -> u16 { 8888 }
 fn default_true() -> bool { true }
 fn default_target_lang() -> String { "ru".to_string() }
 
-fn default_openai_transcribe() -> OpenaiCompatibleConfig {
-    OpenaiCompatibleConfig {
-        model: "whisper-1".to_string(),
-        ..Default::default()
-    }
-}
-
 fn default_local_model() -> LocalModelConfig {
     LocalModelConfig {
         model: "large-v2".to_string(),
-    }
-}
-
-fn default_openai_tts() -> OpenaiCompatibleConfig {
-    OpenaiCompatibleConfig {
-        model: "gpt-4o-mini-tts".to_string(),
-        ..Default::default()
     }
 }
 
@@ -276,23 +214,10 @@ impl Default for TranscribeConfig {
         Self {
             provider: TranscribeProvider::default(),
             enable_gpu_acceleration: false,
-            openai: default_openai_transcribe(),
             fasterwhisper: default_local_model(),
             whisperkit: default_local_model(),
             whispercpp: default_local_model(),
-            aliyun: AliyunTranscribeConfig::default(),
             mlx_whisper: MlxWhisperConfig::default(),
-        }
-    }
-}
-
-impl Default for TtsConfig {
-    fn default() -> Self {
-        Self {
-            provider: TtsProvider::default(),
-            openai: default_openai_tts(),
-            aliyun: AliyunTtsConfig::default(),
-            mlx_audio: MlxAudioConfig::default(),
         }
     }
 }
@@ -317,11 +242,9 @@ impl Default for MlxAudioConfig {
 impl TranscribeProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Openai => "openai",
             Self::Fasterwhisper => "fasterwhisper",
             Self::Whisperkit => "whisperkit",
             Self::Whispercpp => "whispercpp",
-            Self::Aliyun => "aliyun",
             Self::MlxWhisper => "mlx-whisper",
         }
     }
@@ -330,8 +253,6 @@ impl TranscribeProvider {
 impl TtsProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Openai => "openai",
-            Self::Aliyun => "aliyun",
             Self::EdgeTts => "edge-tts",
             Self::MlxAudio => "mlx-audio",
         }
@@ -368,26 +289,12 @@ impl Config {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         match self.transcribe.provider {
-            TranscribeProvider::Openai => {
-                if self.transcribe.openai.api_key.is_empty() && self.llm.api_key.is_empty() {
-                    anyhow::bail!("OpenAI transcription requires an API key");
-                }
-            }
             TranscribeProvider::Fasterwhisper => {}
             TranscribeProvider::Whisperkit => {
                 #[cfg(not(target_os = "macos"))]
                 anyhow::bail!("WhisperKit is only supported on macOS");
             }
             TranscribeProvider::Whispercpp => {}
-            TranscribeProvider::Aliyun => {
-                let speech = &self.transcribe.aliyun.speech;
-                if speech.access_key_id.is_empty()
-                    || speech.access_key_secret.is_empty()
-                    || speech.app_key.is_empty()
-                {
-                    anyhow::bail!("Aliyun transcription requires access_key_id, access_key_secret, and app_key");
-                }
-            }
             TranscribeProvider::MlxWhisper => {
                 #[cfg(not(target_os = "macos"))]
                 anyhow::bail!("MLX Whisper is only supported on macOS (Apple Silicon)");
@@ -395,12 +302,6 @@ impl Config {
         }
 
         match self.tts.provider {
-            TtsProvider::Openai => {
-                if self.tts.openai.api_key.is_empty() && self.llm.api_key.is_empty() {
-                    anyhow::bail!("OpenAI TTS requires an API key");
-                }
-            }
-            TtsProvider::Aliyun => {}
             TtsProvider::EdgeTts => {}
             TtsProvider::MlxAudio => {
                 #[cfg(not(target_os = "macos"))]

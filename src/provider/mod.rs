@@ -1,5 +1,4 @@
 pub mod openai;
-pub mod aliyun;
 pub mod local;
 
 use crate::types::subtitle::TranscriptionData;

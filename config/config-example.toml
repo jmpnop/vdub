@@ -1,6 +1,6 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  KrillinAI Configuration
-#  🎬 Video Dubbing & Subtitle Engine — Rust + MLX
+#  Video Dubbing & Subtitle Engine — Rust + MLX
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [app]
@@ -29,18 +29,13 @@
     model = "gpt-4o-mini"  # For local MLX: "mlx-community/Qwen2.5-7B-Instruct-4bit"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Transcription (ASR)
-# Providers: openai, fasterwhisper, whisperkit, whispercpp, aliyun, mlx-whisper
+# Transcription (ASR) — all free, local providers
+# Providers: fasterwhisper, whisperkit, whispercpp, mlx-whisper
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [transcribe]
-    provider = "openai"              # Choose your ASR provider
+    provider = "fasterwhisper"       # Choose your ASR provider
     enable_gpu_acceleration = false  # For fasterwhisper GPU acceleration
-
-    [transcribe.openai]
-        base_url = ""
-        api_key = ""
-        model = "whisper-1"
 
     [transcribe.fasterwhisper]
         model = "medium"    # Options: tiny, medium, large-v2
@@ -51,53 +46,28 @@
     [transcribe.whispercpp]
         model = "large-v2"
 
-    # 🍎 Apple Silicon MLX Whisper — fastest on-device ASR
+    # Apple Silicon MLX Whisper — fastest on-device ASR
     # Uses Metal GPU automatically, no configuration needed
     [transcribe.mlx_whisper]
         model = "mlx-community/whisper-large-v3-mlx"
 
-    [transcribe.aliyun]
-        [transcribe.aliyun.oss]
-            access_key_id = ""
-            access_key_secret = ""
-            bucket = ""
-        [transcribe.aliyun.speech]
-            access_key_id = ""
-            access_key_secret = ""
-            app_key = ""
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Text-to-Speech (TTS)
-# Providers: openai, aliyun, edge-tts, mlx-audio
+# Text-to-Speech (TTS) — all free, local providers
+# Providers: edge-tts, mlx-audio
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 [tts]
-    provider = "openai"   # Choose your TTS provider
+    provider = "edge-tts"   # Choose your TTS provider
 
-    [tts.openai]
-        base_url = ""
-        api_key = ""
-        model = "gpt-4o-mini-tts"  # Options: gpt-4o-mini-tts, tts-1, tts-1-hd
-
-    # 🍎 Apple Silicon MLX Audio — on-device Kokoro TTS
+    # Apple Silicon MLX Audio — on-device Kokoro TTS
     # Supports: English, Japanese, Mandarin, Spanish, French
     # ~82M parameters, very fast on M-series chips
     [tts.mlx_audio]
         model = "mlx-community/Kokoro-82M-bf16"
         voice = "af_heart"   # Default voice
 
-    [tts.aliyun]
-        [tts.aliyun.oss]
-            access_key_id = ""
-            access_key_secret = ""
-            bucket = ""
-        [tts.aliyun.speech]
-            access_key_id = ""
-            access_key_secret = ""
-            app_key = ""
-
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 🍎 Full Local Apple Silicon Setup (zero cloud dependencies)
+# Full Local Apple Silicon Setup (zero cloud dependencies)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
 # 1. Install MLX tools:
