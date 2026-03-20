@@ -84,17 +84,29 @@ provider = "mlx-audio"
 ```json
 POST /api/capability/subtitleTask
 {
-  "link": "https://youtube.com/watch?v=...",
+  "url": "https://youtube.com/watch?v=...",
   "origin_language": "",
-  "target_language": "",
-  "subtitle_result_type": 3,
-  "enable_tts": true,
-  "tts_voice_code": "alloy",
+  "target_lang": "",
+  "bilingual": 1,
+  "translation_subtitle_pos": 2,
+  "tts": 1,
+  "tts_voice_code": "en-US-AriaNeural",
+  "embed_subtitle_video_type": "horizontal",
   "multi_track": true
 }
 ```
 
-Leave `origin_language` empty for auto-detection. Leave `target_language` empty to auto-select (EN→RU, RU→EN, other→EN).
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | YouTube URL or path to local video |
+| `origin_language` | string | Source language code, empty for auto-detect |
+| `target_lang` | string | Target language code, empty for auto-select (EN↔RU) |
+| `bilingual` | 0/1 | Show both languages in subtitles |
+| `translation_subtitle_pos` | 1/2 | Translation on top (1) or bottom (2) |
+| `tts` | 0/1 | Enable text-to-speech dubbing |
+| `tts_voice_code` | string | Voice ID (e.g. `en-US-AriaNeural` for Edge TTS, `af_heart` for MLX Audio) |
+| `embed_subtitle_video_type` | string | `horizontal`, `vertical`, `all`, or empty to skip |
+| `multi_track` | bool | Add dubbed audio as second track (true) or replace original (false) |
 
 ## Providers
 
