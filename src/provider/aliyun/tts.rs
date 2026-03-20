@@ -63,7 +63,7 @@ impl Ttser for AliyunTtsClient {
         });
 
         write
-            .send(Message::Text(start_msg.to_string().into()))
+            .send(Message::Text(start_msg.to_string()))
             .await?;
 
         // Wait for SynthesisStarted
@@ -83,7 +83,7 @@ impl Ttser for AliyunTtsClient {
             }
         });
         write
-            .send(Message::Text(run_msg.to_string().into()))
+            .send(Message::Text(run_msg.to_string()))
             .await?;
 
         // Send StopSynthesis
@@ -97,7 +97,7 @@ impl Ttser for AliyunTtsClient {
             }
         });
         write
-            .send(Message::Text(stop_msg.to_string().into()))
+            .send(Message::Text(stop_msg.to_string()))
             .await?;
 
         // Receive audio data until SynthesisCompleted

@@ -2,9 +2,10 @@ use crate::storage::BinPaths;
 use crate::types::ass::{ASS_HEADER_HORIZONTAL, ASS_HEADER_VERTICAL};
 use crate::types::subtitle::SrtSentenceWithStrTime;
 use crate::types::task::{self, EmbedVideoType, StepParam, SubtitleResultType};
+use crate::util::{cli_art, cmd};
 use crate::util::srt::parse_srt;
+use std::fmt::Write as FmtWrite;
 use std::path::Path;
-use std::process::Stdio;
 
 /// Step 4: Embed subtitles into video
 pub async fn embed_subtitles(
@@ -12,7 +13,7 @@ pub async fn embed_subtitles(
     param: &mut StepParam,
 ) -> anyhow::Result<()> {
     if param.embed_subtitle_video_type == EmbedVideoType::None {
-        tracing::info!("Subtitle embedding disabled, skipping step 4");
+        tracing::info!("   ⏭️  Subtitle embedding disabled, skipping step 4");
         return Ok(());
     }
 
@@ -26,7 +27,7 @@ pub async fn embed_subtitles(
     {
         &param.input_video_path
     } else {
-        tracing::warn!("No video file available for subtitle embedding");
+        tracing::warn!("   ⚠️  No video file available for subtitle embedding");
         return Ok(());
     };
 
@@ -47,7 +48,7 @@ pub async fn embed_subtitles(
         EmbedVideoType::None => {}
     }
 
-    tracing::info!("Step 4 complete: subtitles embedded into video");
+    cli_art::step_embed_done();
     Ok(())
 }
 
@@ -60,11 +61,9 @@ async fn embed_horizontal(
     let ass_path = format!("{}/horizontal.ass", param.task_base_path);
     let output = format!("{}/{}", param.output_dir(), task::HORIZONTAL_EMBED);
 
-    // Generate ASS file
     let ass_content = generate_ass(subtitles, param, true);
     tokio::fs::write(&ass_path, &ass_content).await?;
 
-    // Burn subtitles
     burn_ass_into_video(bins, video, &ass_path, &output).await
 }
 
@@ -97,15 +96,17 @@ async fn embed_vertical(
             .await
             .unwrap_or(0.0);
         let end_ts = format_ass_time(duration);
-        ass_content.push_str(&format!(
-            "Dialogue: 0,0:00:00.00,{end_ts},Title,,0,0,0,,{}\n",
+        let _ = writeln!(
+            ass_content,
+            "Dialogue: 0,0:00:00.00,{end_ts},Title,,0,0,0,,{}",
             param.vertical_video_major_title
-        ));
+        );
         if !param.vertical_video_minor_title.is_empty() {
-            ass_content.push_str(&format!(
-                "Dialogue: 0,0:00:00.00,{end_ts},SubTitle,,0,0,0,,{}\n",
+            let _ = writeln!(
+                ass_content,
+                "Dialogue: 0,0:00:00.00,{end_ts},SubTitle,,0,0,0,,{}",
                 param.vertical_video_minor_title
-            ));
+            );
         }
     }
 
@@ -124,42 +125,44 @@ fn generate_ass(
         ASS_HEADER_VERTICAL
     };
 
-    let mut content = header.to_string();
+    let mut content = String::with_capacity(header.len() + subtitles.len() * 100);
+    content.push_str(header);
 
     for sub in subtitles {
         let start = format_srt_to_ass_time(&sub.start);
         let end = format_srt_to_ass_time(&sub.end);
 
-        // Split text into lines (bilingual has two lines)
         let lines: Vec<&str> = sub.text.lines().collect();
 
         match param.subtitle_result_type {
             SubtitleResultType::BilingualTranslationOnTop
             | SubtitleResultType::BilingualTranslationOnBottom => {
                 if lines.len() >= 2 {
-                    // Major style for primary language
                     let major_text = split_long_text(lines[0], param.max_word_one_line);
-                    content.push_str(&format!(
-                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{major_text}\n"
-                    ));
-                    // Minor style for secondary language
+                    let _ = writeln!(
+                        content,
+                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{major_text}"
+                    );
                     let minor_text = split_long_text(lines[1], param.max_word_one_line);
-                    content.push_str(&format!(
-                        "Dialogue: 0,{start},{end},Minor,,0,0,0,,{minor_text}\n"
-                    ));
+                    let _ = writeln!(
+                        content,
+                        "Dialogue: 0,{start},{end},Minor,,0,0,0,,{minor_text}"
+                    );
                 } else if !lines.is_empty() {
                     let text = split_long_text(lines[0], param.max_word_one_line);
-                    content.push_str(&format!(
-                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{text}\n"
-                    ));
+                    let _ = writeln!(
+                        content,
+                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{text}"
+                    );
                 }
             }
             _ => {
                 if !lines.is_empty() {
                     let text = split_long_text(lines[0], param.max_word_one_line);
-                    content.push_str(&format!(
-                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{text}\n"
-                    ));
+                    let _ = writeln!(
+                        content,
+                        "Dialogue: 0,{start},{end},Major,,0,0,0,,{text}"
+                    );
                 }
             }
         }
@@ -199,7 +202,6 @@ fn split_long_text(text: &str, max_words: usize) -> String {
     if words.len() <= max_words {
         return text.to_string();
     }
-    // Split roughly in the middle
     let mid = words.len() / 2;
     let line1 = words[..mid].join(" ");
     let line2 = words[mid..].join(" ");
@@ -213,17 +215,9 @@ async fn burn_ass_into_video(
     output: &str,
 ) -> anyhow::Result<()> {
     let vf = format!("ass={ass_path}");
-    let status = tokio::process::Command::new(&bins.ffmpeg)
-        .args(["-y", "-i", video, "-vf", &vf, output])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
-        .await?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to burn subtitles into video");
-    }
-    Ok(())
+    cmd::run_cmd_status(&bins.ffmpeg, &[
+        "-y", "-i", video, "-vf", &vf, output,
+    ]).await
 }
 
 async fn convert_to_vertical(
@@ -231,19 +225,9 @@ async fn convert_to_vertical(
     input: &str,
     output: &str,
 ) -> anyhow::Result<()> {
-    let status = tokio::process::Command::new(&bins.ffmpeg)
-        .args([
-            "-y", "-i", input,
-            "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-            output,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
-        .await?;
-
-    if !status.success() {
-        anyhow::bail!("Failed to convert video to vertical");
-    }
-    Ok(())
+    cmd::run_cmd_status(&bins.ffmpeg, &[
+        "-y", "-i", input,
+        "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
+        output,
+    ]).await
 }

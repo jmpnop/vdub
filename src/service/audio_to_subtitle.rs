@@ -3,13 +3,14 @@ use crate::provider::{ChatCompleter, Transcriber};
 use crate::service::split_audio;
 use crate::service::timestamps::generate_srt_with_timestamps;
 use crate::storage::BinPaths;
-use crate::types::subtitle::{
-    SrtBlock, TranscriptionData, TranslatedItem,
-};
+use crate::types::subtitle::{SrtBlock, TranscriptionData, TranslatedItem};
 use crate::types::task::{StepParam, SubtitleResultType};
+use crate::util::cli_art;
+use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 /// Step 2: Transcribe audio and translate to generate SRT files
 pub async fn audio_to_subtitle(
@@ -31,19 +32,26 @@ pub async fn audio_to_subtitle(
     )
     .await?;
 
-    tracing::info!("Audio split into {} segments", split_points.len() - 1);
-
-    // Split audio and transcribe each segment concurrently
     let num_segments = split_points.len() - 1;
+    tracing::info!("   🔪 Audio split into {num_segments} segments");
+
     let transcribe_sem = Arc::new(Semaphore::new(config.app.transcribe_parallel_num as usize));
     let translate_sem = Arc::new(Semaphore::new(config.app.translate_parallel_num as usize));
     let max_attempts = config.app.transcribe_max_attempts as usize;
     let max_sentence_len = config.app.max_sentence_length as usize;
 
-    // Phase 1: Split and transcribe
-    let mut transcription_results: Vec<(usize, TranscriptionData, f64)> = Vec::new();
+    // Determine the language to pass to ASR
+    // If "auto", pass empty string to enable auto-detection
+    let asr_language = if param.origin_language == "auto" {
+        String::new()
+    } else {
+        param.origin_language.clone()
+    };
 
-    let mut handles = Vec::new();
+    // Phase 1: Split and transcribe using JoinSet
+    let mut transcription_results: Vec<(usize, TranscriptionData, f64)> = Vec::with_capacity(num_segments);
+
+    let mut join_set = JoinSet::new();
     for i in 0..num_segments {
         let start = split_points[i];
         let end = split_points[i + 1];
@@ -52,10 +60,11 @@ pub async fn audio_to_subtitle(
         let ffmpeg = bins.ffmpeg.clone();
         let transcriber = transcriber.clone();
         let sem = transcribe_sem.clone();
-        let lang = param.origin_language.clone();
+        let lang = asr_language.clone();
         let base_path = param.task_base_path.clone();
+        let total = num_segments;
 
-        handles.push(tokio::spawn(async move {
+        join_set.spawn(async move {
             // Split
             split_audio::clip_audio(
                 &ffmpeg,
@@ -68,6 +77,8 @@ pub async fn audio_to_subtitle(
 
             // Transcribe with retry
             let _permit = sem.acquire().await?;
+            cli_art::step_transcribe_segment(i, total);
+
             let mut last_err = None;
             for attempt in 0..max_attempts.max(1) {
                 match transcriber
@@ -87,34 +98,72 @@ pub async fn audio_to_subtitle(
                         return Ok::<_, anyhow::Error>((i, data, start));
                     }
                     Err(e) => {
-                        tracing::warn!("Transcription attempt {}/{max_attempts} failed for segment {i}: {e}", attempt + 1);
+                        tracing::warn!(
+                            "   ⚠️  Transcription attempt {}/{max_attempts} failed for segment {i}: {e}",
+                            attempt + 1
+                        );
                         last_err = Some(e);
                     }
                 }
             }
             Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Transcription failed")))
-        }));
+        });
     }
 
-    for handle in handles {
-        let result = handle.await??;
+    // Collect results as they complete
+    while let Some(result) = join_set.join_next().await {
+        let result = result??;
         transcription_results.push(result);
     }
 
     // Sort by segment index
     transcription_results.sort_by_key(|(i, _, _)| *i);
 
+    // Auto language detection: use the detected language from the first segment
+    if param.origin_language == "auto" && !transcription_results.is_empty() {
+        let detected = &transcription_results[0].1.language;
+        if !detected.is_empty() {
+            cli_art::step_transcribe_lang_detected(detected);
+            param.detected_language = detected.clone();
+            param.origin_language = detected.clone();
+
+            // Auto-determine target language (EN↔RU)
+            if param.target_language == "auto" {
+                param.target_language = cli_art::auto_target_language(detected).to_string();
+            }
+
+            cli_art::auto_lang_info(
+                cli_art::lang_display_name(&param.origin_language),
+                cli_art::lang_display_name(&param.target_language),
+            );
+        } else {
+            // Fallback: assume English → Russian
+            tracing::warn!("   ⚠️  Language detection returned empty, defaulting to en → ru");
+            param.origin_language = "en".to_string();
+            if param.target_language == "auto" {
+                param.target_language = "ru".to_string();
+            }
+        }
+    }
+
     // Phase 2: Translate each segment's text
+    let needs_translation = param.subtitle_result_type != SubtitleResultType::OriginOnly
+        && !param.target_language.is_empty()
+        && param.origin_language != param.target_language;
+
+    if needs_translation {
+        cli_art::step_translate_start(
+            cli_art::lang_display_name(&param.origin_language),
+            cli_art::lang_display_name(&param.target_language),
+        );
+    }
+
     let mut all_blocks: Vec<SrtBlock> = Vec::new();
 
     for (seg_idx, transcription, time_offset) in &transcription_results {
         if transcription.text.trim().is_empty() {
             continue;
         }
-
-        let needs_translation = param.subtitle_result_type != SubtitleResultType::OriginOnly
-            && !param.target_language.is_empty()
-            && param.origin_language != param.target_language;
 
         let items = if needs_translation {
             translate_text(
@@ -157,7 +206,7 @@ pub async fn audio_to_subtitle(
     // Write SRT files
     write_srt_files(param, &all_blocks).await?;
 
-    tracing::info!("Step 2 complete: {} subtitle blocks generated", all_blocks.len());
+    cli_art::step_transcribe_done(all_blocks.len());
     Ok(())
 }
 
@@ -208,7 +257,7 @@ async fn translate_text(
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Translation attempt {}/{max_attempts} failed for sentence {i}: {e}",
+                        "   ⚠️  Translation attempt {}/{max_attempts} failed for sentence {i}: {e}",
                         attempt + 1
                     );
                     last_err = Some(e);
@@ -218,7 +267,7 @@ async fn translate_text(
 
         if let Some(e) = last_err {
             // Use original text as fallback
-            tracing::error!("Translation failed for sentence {i}, using original: {e}");
+            tracing::error!("   ❌ Translation failed for sentence {i}, using original: {e}");
             results.push(TranslatedItem {
                 origin_text: sentence.clone(),
                 translated_text: sentence.clone(),
@@ -254,13 +303,13 @@ fn split_into_sentences(text: &str, max_chars: usize) -> Vec<String> {
     sentences
 }
 
-/// Write the various SRT output files
+/// Write the various SRT output files using write! macro for efficiency
 async fn write_srt_files(param: &mut StepParam, blocks: &[SrtBlock]) -> anyhow::Result<()> {
     let output_dir = param.output_dir();
 
     // Bilingual SRT
     let bilingual_path = format!("{output_dir}/{}", crate::types::task::BILINGUAL_SRT_FILE);
-    let mut bilingual = String::new();
+    let mut bilingual = String::with_capacity(blocks.len() * 120);
     for block in blocks {
         let text = match param.subtitle_result_type {
             SubtitleResultType::BilingualTranslationOnTop => {
@@ -271,30 +320,30 @@ async fn write_srt_files(param: &mut StepParam, blocks: &[SrtBlock]) -> anyhow::
             }
             _ => block.origin_language_sentence.clone(),
         };
-        bilingual.push_str(&format!("{}\n{}\n{}\n\n", block.index, block.timestamp, text));
+        let _ = write!(bilingual, "{}\n{}\n{}\n\n", block.index, block.timestamp, text);
     }
     tokio::fs::write(&bilingual_path, &bilingual).await?;
     param.bilingual_srt_file_path = bilingual_path.clone();
 
     // Origin-only SRT
     let origin_path = format!("{output_dir}/{}", crate::types::task::ORIGIN_LANG_SRT_FILE);
-    let mut origin = String::new();
+    let mut origin = String::with_capacity(blocks.len() * 80);
     for block in blocks {
-        origin.push_str(&format!(
-            "{}\n{}\n{}\n\n",
+        let _ = write!(
+            origin, "{}\n{}\n{}\n\n",
             block.index, block.timestamp, block.origin_language_sentence
-        ));
+        );
     }
     tokio::fs::write(&origin_path, &origin).await?;
 
     // Target-only SRT
     let target_path = format!("{output_dir}/{}", crate::types::task::TARGET_LANG_SRT_FILE);
-    let mut target = String::new();
+    let mut target = String::with_capacity(blocks.len() * 80);
     for block in blocks {
-        target.push_str(&format!(
-            "{}\n{}\n{}\n\n",
+        let _ = write!(
+            target, "{}\n{}\n{}\n\n",
             block.index, block.timestamp, block.target_language_sentence
-        ));
+        );
     }
     tokio::fs::write(&target_path, &target).await?;
 

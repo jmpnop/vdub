@@ -26,7 +26,7 @@ pub async fn cosy_voice_clone(
         ("VoicePrefix", voice_prefix.to_string()),
     ];
 
-    params.sort_by(|a, b| a.0.cmp(&b.0));
+    params.sort_by(|a, b| a.0.cmp(b.0));
 
     let query: String = params
         .iter()

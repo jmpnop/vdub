@@ -1,25 +1,19 @@
+use crate::util::cmd;
 use std::path::Path;
-use std::process::Stdio;
 
 /// Get audio duration in seconds via ffprobe
 pub async fn get_duration(ffprobe: &str, input: &Path) -> anyhow::Result<f64> {
-    let output = tokio::process::Command::new(ffprobe)
-        .args([
-            "-i",
-            input.to_str().unwrap(),
-            "-show_entries",
-            "format=duration",
-            "-v",
-            "quiet",
-            "-of",
-            "csv=p=0",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await?;
+    let input_str = input.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", input.display()))?;
 
-    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stdout = cmd::run_cmd(ffprobe, &[
+        "-i", input_str,
+        "-show_entries", "format=duration",
+        "-v", "quiet",
+        "-of", "csv=p=0",
+    ]).await?;
+
+    let s = String::from_utf8_lossy(&stdout).trim().to_string();
     s.parse::<f64>()
         .map_err(|_| anyhow::anyhow!("Failed to parse duration from ffprobe: '{s}'"))
 }
@@ -33,27 +27,16 @@ pub async fn process_audio(ffmpeg: &str, input: &Path) -> anyhow::Result<String>
     let parent = input.parent().unwrap_or(Path::new("."));
     let output = parent.join(format!("{stem}_mono_16K.mp3"));
 
-    let status = tokio::process::Command::new(ffmpeg)
-        .args([
-            "-y",
-            "-i",
-            input.to_str().unwrap(),
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-b:a",
-            "192k",
-            output.to_str().unwrap(),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await?;
+    let input_str = input.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", input.display()))?;
+    let output_str = output.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", output.display()))?;
 
-    if !status.success() {
-        anyhow::bail!("ffmpeg audio processing failed");
-    }
+    cmd::run_cmd_status(ffmpeg, &[
+        "-y", "-i", input_str,
+        "-ac", "1", "-ar", "16000", "-b:a", "192k",
+        output_str,
+    ]).await?;
 
     Ok(output.to_string_lossy().to_string())
 }

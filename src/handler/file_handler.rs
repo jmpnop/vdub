@@ -3,10 +3,9 @@ use axum::body::Body;
 use axum::extract::{Multipart, Path};
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use tokio::io::AsyncWriteExt;
 
-pub async fn upload_file(mut multipart: Multipart) -> Json<serde_json::Value> {
+pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
     let mut file_paths = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -17,8 +16,8 @@ pub async fn upload_file(mut multipart: Multipart) -> Json<serde_json::Value> {
 
         let upload_dir = "./uploads";
         if let Err(e) = tokio::fs::create_dir_all(upload_dir).await {
-            let resp = ApiResponse::<()>::error(&format!("Failed to create upload dir: {e}"));
-            return Json(serde_json::to_value(resp).unwrap());
+            return ApiResponse::<()>::error(&format!("Failed to create upload dir: {e}"))
+                .into_response();
         }
 
         let dest = format!("{upload_dir}/{file_name}");
@@ -27,27 +26,27 @@ pub async fn upload_file(mut multipart: Multipart) -> Json<serde_json::Value> {
                 let mut file = match tokio::fs::File::create(&dest).await {
                     Ok(f) => f,
                     Err(e) => {
-                        let resp = ApiResponse::<()>::error(&format!("Failed to create file: {e}"));
-                        return Json(serde_json::to_value(resp).unwrap());
+                        return ApiResponse::<()>::error(&format!("Failed to create file: {e}"))
+                            .into_response();
                     }
                 };
                 if let Err(e) = file.write_all(&data).await {
-                    let resp = ApiResponse::<()>::error(&format!("Failed to write file: {e}"));
-                    return Json(serde_json::to_value(resp).unwrap());
+                    return ApiResponse::<()>::error(&format!("Failed to write file: {e}"))
+                        .into_response();
                 }
                 file_paths.push(format!("local:{dest}"));
             }
             Err(e) => {
-                let resp = ApiResponse::<()>::error(&format!("Failed to read field: {e}"));
-                return Json(serde_json::to_value(resp).unwrap());
+                return ApiResponse::<()>::error(&format!("Failed to read field: {e}"))
+                    .into_response();
             }
         }
     }
 
-    let resp = ApiResponse::success(UploadFileResponse {
+    ApiResponse::success(UploadFileResponse {
         file_path: file_paths,
-    });
-    Json(serde_json::to_value(resp).unwrap())
+    })
+    .into_response()
 }
 
 pub async fn download_file(Path(filepath): Path<String>) -> Response {

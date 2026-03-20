@@ -1,5 +1,5 @@
+use crate::util::cmd;
 use std::path::Path;
-use std::process::Stdio;
 
 const SAMPLE_RATE: u32 = 3000;
 const ENERGY_WINDOW_SECONDS: f64 = 1.5;
@@ -21,7 +21,8 @@ pub async fn get_split_points(
     }
 
     let num_segments = (duration / segment_duration).ceil() as usize;
-    let mut split_points = vec![0.0];
+    let mut split_points = Vec::with_capacity(num_segments + 2);
+    split_points.push(0.0);
 
     for i in 1..num_segments {
         let target = i as f64 * segment_duration;
@@ -34,7 +35,6 @@ pub async fn get_split_points(
         }
 
         let quiet_point = get_quietest_point(ffmpeg, audio, search_start, search_end).await?;
-        // Ensure minimum segment duration
         if quiet_point - split_points.last().unwrap() >= MIN_SEGMENT_SECONDS {
             split_points.push(quiet_point);
         } else {
@@ -53,30 +53,28 @@ async fn get_quietest_point(
     start: f64,
     end: f64,
 ) -> anyhow::Result<f64> {
-    // Extract raw audio samples with lowpass/highpass filter
-    let output = tokio::process::Command::new(ffmpeg)
-        .args([
-            "-y",
-            "-ss", &format!("{start}"),
-            "-to", &format!("{end}"),
-            "-i", audio.to_str().unwrap(),
-            "-f", "s16le",
-            "-ar", &SAMPLE_RATE.to_string(),
-            "-ac", "1",
-            "-af", "lowpass=f=3000,highpass=f=300",
-            "pipe:1",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await?;
+    let audio_str = audio.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", audio.display()))?;
+    let start_str = format!("{start}");
+    let end_str = format!("{end}");
+    let sr_str = SAMPLE_RATE.to_string();
 
-    let samples = &output.stdout;
+    let samples = cmd::run_cmd_raw(ffmpeg, &[
+        "-y",
+        "-ss", &start_str,
+        "-to", &end_str,
+        "-i", audio_str,
+        "-f", "s16le",
+        "-ar", &sr_str,
+        "-ac", "1",
+        "-af", "lowpass=f=3000,highpass=f=300",
+        "pipe:1",
+    ]).await?;
+
     if samples.len() < 4 {
         return Ok((start + end) / 2.0);
     }
 
-    // Convert bytes to i16 samples
     let sample_count = samples.len() / 2;
     let window_samples = (ENERGY_WINDOW_SECONDS * SAMPLE_RATE as f64) as usize;
 
@@ -87,7 +85,6 @@ async fn get_quietest_point(
     // Sliding window energy analysis
     let mut min_energy = f64::MAX;
     let mut min_pos = 0usize;
-
     let mut current_energy: f64 = 0.0;
 
     // Initialize first window
@@ -135,21 +132,18 @@ pub async fn clip_audio(
     start: f64,
     end: f64,
 ) -> anyhow::Result<()> {
-    let status = tokio::process::Command::new(ffmpeg)
-        .args([
-            "-y",
-            "-ss", &format!("{start}"),
-            "-to", &format!("{end}"),
-            "-i", input.to_str().unwrap(),
-            output.to_str().unwrap(),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await?;
+    let input_str = input.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", input.display()))?;
+    let output_str = output.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", output.display()))?;
+    let start_str = format!("{start}");
+    let end_str = format!("{end}");
 
-    if !status.success() {
-        anyhow::bail!("Failed to clip audio segment {start}-{end}");
-    }
-    Ok(())
+    cmd::run_cmd_status(ffmpeg, &[
+        "-y",
+        "-ss", &start_str,
+        "-to", &end_str,
+        "-i", input_str,
+        output_str,
+    ]).await
 }

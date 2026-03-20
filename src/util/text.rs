@@ -1,9 +1,20 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+static SANITIZE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"[<>:"/\\|?*\x00-\x1f]"#).unwrap());
+
+static YOUTUBE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})")
+        .unwrap()
+});
+
+static BILIBILI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"bilibili\.com/video/(BV[a-zA-Z0-9]+)").unwrap());
 
 /// Remove characters that are invalid in file paths
 pub fn sanitize_path_name(name: &str) -> String {
-    let re = Regex::new(r#"[<>:"/\\|?*\x00-\x1f]"#).unwrap();
-    let sanitized = re.replace_all(name, "_").to_string();
+    let sanitized = SANITIZE_RE.replace_all(name, "_").to_string();
     sanitized.trim_matches('.').to_string()
 }
 
@@ -29,17 +40,12 @@ pub fn clean_punctuation(word: &str) -> String {
 
 /// Extract YouTube video ID from URL
 pub fn get_youtube_id(url: &str) -> Option<String> {
-    let re = Regex::new(
-        r"(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
-    )
-    .ok()?;
-    re.captures(url).map(|c| c[1].to_string())
+    YOUTUBE_RE.captures(url).map(|c| c[1].to_string())
 }
 
 /// Extract Bilibili video ID from URL
 pub fn get_bilibili_id(url: &str) -> Option<String> {
-    let re = Regex::new(r"bilibili\.com/video/(BV[a-zA-Z0-9]+)").ok()?;
-    re.captures(url).map(|c| c[1].to_string())
+    BILIBILI_RE.captures(url).map(|c| c[1].to_string())
 }
 
 /// Check if a character is part of a CJK script

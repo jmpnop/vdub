@@ -1,5 +1,7 @@
 pub mod audio;
-pub mod video;
+pub mod cli_art;
+pub mod cmd;
+pub mod download;
 pub mod srt;
 pub mod text;
-pub mod download;
+pub mod video;

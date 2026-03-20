@@ -23,18 +23,15 @@ pub enum SubtitleResultType {
 // Embed subtitle video type
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum EmbedVideoType {
+    #[default]
     None,
     Horizontal,
     Vertical,
     All,
 }
 
-impl Default for EmbedVideoType {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 impl From<&str> for EmbedVideoType {
     fn from(s: &str) -> Self {
@@ -101,7 +98,7 @@ impl SubtitleTask {
     }
 
     pub fn set_progress(&mut self, pct: u8) {
-        self.process_pct = pct;
+        self.process_pct = pct.min(100);
         self.update_time = chrono::Utc::now().timestamp();
     }
 
@@ -138,6 +135,10 @@ pub struct StepParam {
     pub vertical_video_minor_title: String,
     pub max_word_one_line: usize,
     pub subtitle_infos: Vec<SubtitleInfo>,
+    /// Whether to add dubbed audio as a second track (true) or replace original (false)
+    pub multi_track_audio: bool,
+    /// Detected language from Whisper (filled during transcription)
+    pub detected_language: String,
 }
 
 impl StepParam {

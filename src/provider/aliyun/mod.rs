@@ -27,7 +27,7 @@ pub async fn create_token(
         ("Version", "2019-02-28".to_string()),
     ];
 
-    params.sort_by(|a, b| a.0.cmp(&b.0));
+    params.sort_by(|a, b| a.0.cmp(b.0));
 
     let query: String = params
         .iter()

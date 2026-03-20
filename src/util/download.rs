@@ -29,7 +29,7 @@ pub async fn download_file(url: &str, dest: &Path, proxy: Option<&str>) -> anyho
 
         if total > 0 {
             let pct = (downloaded as f64 / total as f64 * 100.0) as u32;
-            if pct % 10 == 0 {
+            if pct.is_multiple_of(10) {
                 tracing::debug!("Download progress: {pct}%");
             }
         }

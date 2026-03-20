@@ -25,7 +25,9 @@ struct WcppTranscription {
 struct WcppToken {
     text: Option<String>,
     timestamps: Option<WcppTimestamps>,
+    #[allow(dead_code)]
     id: Option<i64>,
+    #[allow(dead_code)]
     p: Option<f64>,
 }
 

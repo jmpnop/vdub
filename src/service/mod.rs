@@ -6,7 +6,7 @@ pub mod upload_subtitles;
 pub mod split_audio;
 pub mod timestamps;
 
-use crate::config::Config;
+use crate::config::{Config, TranscribeProvider, TtsProvider};
 use crate::provider::local::edge_tts::EdgeTtsClient;
 use crate::provider::local::fasterwhisper::FasterWhisperProcessor;
 use crate::provider::local::whispercpp::WhisperCppProcessor;
@@ -34,23 +34,54 @@ impl Service {
             Some(config.app.proxy.as_str())
         };
 
-        // Transcriber
-        let transcriber: Arc<dyn Transcriber> = match config.transcribe.provider.as_str() {
-            "fasterwhisper" => Arc::new(FasterWhisperProcessor::new(
+        // Transcriber — exhaustive match on enum
+        let transcriber: Arc<dyn Transcriber> = match config.transcribe.provider {
+            TranscribeProvider::Fasterwhisper => Arc::new(FasterWhisperProcessor::new(
                 &bins.fasterwhisper,
                 &config.transcribe.fasterwhisper.model,
                 config.transcribe.enable_gpu_acceleration,
             )),
-            "whispercpp" => Arc::new(WhisperCppProcessor::new(
+            TranscribeProvider::Whispercpp => Arc::new(WhisperCppProcessor::new(
                 &bins.whispercpp,
                 &config.transcribe.whispercpp.model,
             )),
-            "whisperkit" => Arc::new(WhisperKitProcessor::new(
+            TranscribeProvider::Whisperkit => Arc::new(WhisperKitProcessor::new(
                 &bins.whisperkit,
                 &config.transcribe.whisperkit.model,
             )),
-            // "openai" and default
-            _ => Arc::new(OpenAiClient::new(
+            #[cfg(target_os = "macos")]
+            TranscribeProvider::MlxWhisper => {
+                Arc::new(crate::provider::local::mlx_whisper::MlxWhisperProcessor::new(
+                    &config.transcribe.mlx_whisper.model,
+                ))
+            }
+            #[cfg(not(target_os = "macos"))]
+            TranscribeProvider::MlxWhisper => {
+                tracing::warn!("⚠️  MLX Whisper not available on this platform, falling back to OpenAI");
+                Arc::new(OpenAiClient::new(
+                    &config.transcribe.openai.base_url,
+                    if config.transcribe.openai.api_key.is_empty() {
+                        &config.llm.api_key
+                    } else {
+                        &config.transcribe.openai.api_key
+                    },
+                    &config.transcribe.openai.model,
+                    proxy,
+                ))
+            }
+            TranscribeProvider::Aliyun => {
+                let speech = &config.transcribe.aliyun.speech;
+                let oss = &config.transcribe.aliyun.oss;
+                Arc::new(crate::provider::aliyun::asr::AliyunAsrClient::new(
+                    &speech.access_key_id,
+                    &speech.access_key_secret,
+                    &speech.app_key,
+                    &oss.bucket,
+                    &oss.access_key_id,
+                    &oss.access_key_secret,
+                ))
+            }
+            TranscribeProvider::Openai => Arc::new(OpenAiClient::new(
                 &config.transcribe.openai.base_url,
                 if config.transcribe.openai.api_key.is_empty() {
                     &config.llm.api_key
@@ -62,7 +93,7 @@ impl Service {
             )),
         };
 
-        // Chat completer (always OpenAI-compatible)
+        // Chat completer (always OpenAI-compatible — works with mlx_lm.server too)
         let chat_completer: Arc<dyn ChatCompleter> = Arc::new(OpenAiClient::new(
             &config.llm.base_url,
             &config.llm.api_key,
@@ -70,11 +101,39 @@ impl Service {
             proxy,
         ));
 
-        // TTS
-        let tts_client: Arc<dyn Ttser> = match config.tts.provider.as_str() {
-            "edge-tts" => Arc::new(EdgeTtsClient::new(&bins.edge_tts)),
-            // "openai" and default
-            _ => Arc::new(OpenAiClient::new(
+        // TTS — exhaustive match on enum
+        let tts_client: Arc<dyn Ttser> = match config.tts.provider {
+            TtsProvider::EdgeTts => Arc::new(EdgeTtsClient::new(&bins.edge_tts)),
+            TtsProvider::Aliyun => {
+                let speech = &config.tts.aliyun.speech;
+                Arc::new(crate::provider::aliyun::tts::AliyunTtsClient::new(
+                    &speech.access_key_id,
+                    &speech.access_key_secret,
+                    &speech.app_key,
+                ))
+            }
+            #[cfg(target_os = "macos")]
+            TtsProvider::MlxAudio => {
+                Arc::new(crate::provider::local::mlx_audio::MlxAudioClient::new(
+                    &config.tts.mlx_audio.model,
+                    &config.tts.mlx_audio.voice,
+                ))
+            }
+            #[cfg(not(target_os = "macos"))]
+            TtsProvider::MlxAudio => {
+                tracing::warn!("⚠️  MLX Audio not available on this platform, falling back to OpenAI");
+                Arc::new(OpenAiClient::new(
+                    &config.tts.openai.base_url,
+                    if config.tts.openai.api_key.is_empty() {
+                        &config.llm.api_key
+                    } else {
+                        &config.tts.openai.api_key
+                    },
+                    &config.tts.openai.model,
+                    proxy,
+                ))
+            }
+            TtsProvider::Openai => Arc::new(OpenAiClient::new(
                 &config.tts.openai.base_url,
                 if config.tts.openai.api_key.is_empty() {
                     &config.llm.api_key

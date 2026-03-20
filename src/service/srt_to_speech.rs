@@ -1,24 +1,26 @@
+use crate::config::Config;
 use crate::provider::Ttser;
 use crate::storage::BinPaths;
 use crate::types::subtitle::{SrtSentenceWithStrTime, parse_timestamp};
 use crate::types::task::{self, StepParam};
+use crate::util::{cli_art, cmd};
 use crate::util::srt::parse_srt;
+use std::collections::HashMap;
 use std::path::Path;
-use std::process::Stdio;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-const MAX_TTS_CONCURRENT: usize = 3;
 const MAX_FAILURE_RATIO: f64 = 0.5;
 
-/// Step 3: Generate TTS audio for each subtitle and replace video audio
+/// Step 3: Generate TTS audio for each subtitle and replace/add to video audio
 pub async fn srt_to_speech(
     bins: &BinPaths,
+    config: &Config,
     tts_client: &Arc<dyn Ttser>,
     param: &mut StepParam,
 ) -> anyhow::Result<()> {
     if !param.enable_tts {
-        tracing::info!("TTS disabled, skipping step 3");
+        tracing::info!("   ⏭️  TTS disabled, skipping step 3");
         return Ok(());
     }
 
@@ -27,14 +29,15 @@ pub async fn srt_to_speech(
     let subtitles = parse_srt(&srt_content);
 
     if subtitles.is_empty() {
-        tracing::warn!("No subtitles found for TTS");
+        tracing::warn!("   ⚠️  No subtitles found for TTS");
         return Ok(());
     }
 
-    tracing::info!("Generating TTS for {} subtitle entries", subtitles.len());
+    tracing::info!("   🎵 Generating TTS for {} entries", subtitles.len());
 
     // Generate TTS for each subtitle concurrently
-    let sem = Arc::new(Semaphore::new(MAX_TTS_CONCURRENT));
+    let tts_parallel = config.app.tts_parallel_num as usize;
+    let sem = Arc::new(Semaphore::new(tts_parallel));
     let mut handles = Vec::new();
     let mut failed_count = 0usize;
 
@@ -54,11 +57,17 @@ pub async fn srt_to_speech(
     }
 
     let mut audio_paths: Vec<Option<String>> = vec![None; subtitles.len()];
+    let total = subtitles.len();
     for (i, handle) in handles.into_iter().enumerate() {
         match handle.await? {
-            Ok(path) => audio_paths[i] = Some(path),
+            Ok(path) => {
+                audio_paths[i] = Some(path);
+                if (i + 1) % 5 == 0 || i + 1 == total {
+                    cli_art::step_tts_progress(i + 1, total);
+                }
+            }
             Err(e) => {
-                tracing::warn!("TTS failed for subtitle {i}: {e}");
+                tracing::warn!("   ⚠️  TTS failed for subtitle {i}: {e}");
                 failed_count += 1;
             }
         }
@@ -78,26 +87,46 @@ pub async fn srt_to_speech(
 
     param.tts_result_file_path = final_audio.clone();
 
-    // Replace video audio if video exists
+    // Replace or add audio track to video
     if !param.input_video_path.is_empty() && Path::new(&param.input_video_path).exists() {
         let output_video = format!("{}/{}", param.task_base_path, task::VIDEO_WITH_TTS);
-        crate::util::video::replace_audio(
-            &bins.ffmpeg,
-            Path::new(&param.input_video_path),
-            Path::new(&final_audio),
-            Path::new(&output_video),
-        )
-        .await?;
+
+        if param.multi_track_audio {
+            // Add as second audio track with language metadata
+            let orig_lang = cli_art::lang_to_iso639_2(&param.origin_language);
+            let target_lang = cli_art::lang_to_iso639_2(&param.target_language);
+            crate::util::video::add_audio_track(
+                &bins.ffmpeg,
+                Path::new(&param.input_video_path),
+                Path::new(&final_audio),
+                Path::new(&output_video),
+                orig_lang,
+                target_lang,
+            )
+            .await?;
+            tracing::info!("   🎬 Multi-track video created (original + dubbed audio)");
+        } else {
+            // Replace audio track entirely
+            crate::util::video::replace_audio(
+                &bins.ffmpeg,
+                Path::new(&param.input_video_path),
+                Path::new(&final_audio),
+                Path::new(&output_video),
+            )
+            .await?;
+        }
         param.video_with_tts_file_path = output_video;
-        tracing::info!("Step 3 complete: video with TTS audio created");
+        cli_art::step_tts_done();
     } else {
-        tracing::info!("Step 3 complete: TTS audio generated (no video to replace)");
+        cli_art::step_tts_done();
+        tracing::info!("   ℹ️  TTS audio generated (no video to merge with)");
     }
 
     Ok(())
 }
 
-/// Build the final concatenated audio with correct timing
+/// Build the final concatenated audio with correct timing.
+/// Uses a duration cache to avoid duplicate ffprobe calls.
 async fn build_final_audio(
     bins: &BinPaths,
     subtitles: &[SrtSentenceWithStrTime],
@@ -108,6 +137,9 @@ async fn build_final_audio(
     let concat_list = output_dir.join("concat_list.txt");
     let mut list_content = String::new();
 
+    // Duration cache to avoid redundant ffprobe calls
+    let mut duration_cache: HashMap<String, f64> = HashMap::new();
+
     for (i, sub) in subtitles.iter().enumerate() {
         let start = parse_timestamp(&sub.start).unwrap_or(0.0);
         let end = parse_timestamp(&sub.end).unwrap_or(start + 1.0);
@@ -116,29 +148,25 @@ async fn build_final_audio(
         // Determine the audio file for this segment
         let segment_file = if let Some(path) = &audio_paths[i] {
             if Path::new(path).exists() {
-                // Get actual duration and adjust if needed
-                let actual = crate::util::audio::get_duration(&bins.ffprobe, Path::new(path))
-                    .await
-                    .unwrap_or(target_duration);
+                // Get actual duration (cached)
+                let actual = get_cached_duration(&bins.ffprobe, path, &mut duration_cache).await;
 
                 if actual > target_duration * 1.1 {
                     // Audio too long — speed up with atempo
                     let ratio = actual / target_duration;
                     let adjusted = output_dir.join(format!("subtitle_{i}_adjusted.wav"));
-                    let atempo = ratio.min(4.0); // atempo max is 4.0
-                    let status = tokio::process::Command::new(&bins.ffmpeg)
-                        .args([
-                            "-y",
-                            "-i", path,
-                            "-af", &format!("atempo={atempo}"),
-                            adjusted.to_str().unwrap(),
-                        ])
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status()
-                        .await?;
-                    if status.success() {
-                        adjusted.to_string_lossy().to_string()
+                    let adjusted_str = adjusted.to_string_lossy().to_string();
+                    let atempo = ratio.min(4.0);
+                    let atempo_str = format!("atempo={atempo}");
+
+                    if cmd::run_cmd_status(
+                        &bins.ffmpeg,
+                        &["-y", "-i", path, "-af", &atempo_str, &adjusted_str],
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        adjusted_str
                     } else {
                         path.clone()
                     }
@@ -146,11 +174,9 @@ async fn build_final_audio(
                     path.clone()
                 }
             } else {
-                // File missing, generate silence
                 generate_silence(bins, output_dir, i, target_duration).await?
             }
         } else {
-            // TTS failed, generate silence
             generate_silence(bins, output_dir, i, target_duration).await?
         };
 
@@ -168,9 +194,7 @@ async fn build_final_audio(
         // Add silence padding if audio is shorter than target duration
         if let Some(path) = &audio_paths[i] {
             if Path::new(path).exists() {
-                let actual = crate::util::audio::get_duration(&bins.ffprobe, Path::new(path))
-                    .await
-                    .unwrap_or(0.0);
+                let actual = get_cached_duration(&bins.ffprobe, path, &mut duration_cache).await;
                 let pad = target_duration - actual;
                 if pad > 0.05 {
                     let pad_file = generate_silence(bins, output_dir, 8000 + i, pad).await?;
@@ -183,25 +207,33 @@ async fn build_final_audio(
     tokio::fs::write(&concat_list, &list_content).await?;
 
     // Concatenate all files
-    let status = tokio::process::Command::new(&bins.ffmpeg)
-        .args([
-            "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_list.to_str().unwrap(),
-            "-c", "copy",
-            output,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await?;
+    let concat_str = concat_list.to_str()
+        .ok_or_else(|| anyhow::anyhow!("Invalid UTF-8 path: {}", concat_list.display()))?;
 
-    if !status.success() {
-        anyhow::bail!("Failed to concatenate TTS audio files");
+    cmd::run_cmd_status(&bins.ffmpeg, &[
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_str,
+        "-c", "copy",
+        output,
+    ]).await
+}
+
+/// Get duration with caching
+async fn get_cached_duration(
+    ffprobe: &str,
+    path: &str,
+    cache: &mut HashMap<String, f64>,
+) -> f64 {
+    if let Some(&d) = cache.get(path) {
+        return d;
     }
-
-    Ok(())
+    let d = crate::util::audio::get_duration(ffprobe, Path::new(path))
+        .await
+        .unwrap_or(0.0);
+    cache.insert(path.to_string(), d);
+    d
 }
 
 /// Generate a silence WAV file
@@ -212,23 +244,17 @@ async fn generate_silence(
     duration: f64,
 ) -> anyhow::Result<String> {
     let path = dir.join(format!("silence_{index}.wav"));
-    let status = tokio::process::Command::new(&bins.ffmpeg)
-        .args([
-            "-y",
-            "-f", "lavfi",
-            "-i", &format!("anullsrc=r=44100:cl=stereo"),
-            "-t", &format!("{duration}"),
-            "-q:a", "9",
-            path.to_str().unwrap(),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await?;
+    let path_str = path.to_string_lossy().to_string();
+    let dur_str = format!("{duration}");
 
-    if !status.success() {
-        anyhow::bail!("Failed to generate silence");
-    }
+    cmd::run_cmd_status(&bins.ffmpeg, &[
+        "-y",
+        "-f", "lavfi",
+        "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", &dur_str,
+        "-q:a", "9",
+        &path_str,
+    ]).await?;
 
-    Ok(path.to_string_lossy().to_string())
+    Ok(path_str)
 }

@@ -3,8 +3,10 @@ use crate::dto::{
     SubtitleInfoDto, VideoInfo,
 };
 use crate::types::task::{EmbedVideoType, SubtitleResultType, SubtitleTask};
+use crate::util::cli_art;
 use crate::AppState;
 use axum::extract::{Query, State};
+use axum::response::IntoResponse;
 use axum::Json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use std::sync::Arc;
 pub async fn start_task(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartTaskRequest>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     // Generate task ID
     let task_id = format!(
         "{}_{}",
@@ -46,20 +48,47 @@ pub async fn start_task(
     let task_base_path = format!("./tasks/{task_id}");
     let output_dir = format!("{task_base_path}/output");
     if let Err(e) = tokio::fs::create_dir_all(&output_dir).await {
-        let resp = ApiResponse::<()>::error(&format!("Failed to create task directory: {e}"));
-        return Json(serde_json::to_value(resp).unwrap());
+        return ApiResponse::<()>::error(&format!("Failed to create task directory: {e}"))
+            .into_response();
     }
+
+    // Auto-detect language mode: when origin_language is empty, use "auto"
+    let config = state.config.read().await;
+    let origin_language = if req.origin_language.is_empty() && config.app.auto_detect_language {
+        "auto".to_string()
+    } else if req.origin_language.is_empty() {
+        "en".to_string()
+    } else {
+        req.origin_language.clone()
+    };
+
+    // Auto target language: when target is empty, will be determined after detection
+    let target_language = if req.target_lang.is_empty() && config.app.auto_detect_language {
+        "auto".to_string()
+    } else if req.target_lang.is_empty() {
+        config.app.default_target_language.clone()
+    } else {
+        req.target_lang.clone()
+    };
+
+    // Adjust subtitle result type for auto mode — default to bilingual
+    let subtitle_result_type = if origin_language == "auto" && subtitle_result_type == SubtitleResultType::OriginOnly {
+        SubtitleResultType::BilingualTranslationOnBottom
+    } else {
+        subtitle_result_type
+    };
+    drop(config);
 
     // Create and store task
     let task = SubtitleTask::new(
         task_id.clone(),
         req.url.clone(),
-        req.origin_language.clone(),
-        req.target_lang.clone(),
+        origin_language.clone(),
+        target_language.clone(),
     );
     state.task_store.insert(task);
 
-    // Build step params and spawn the processing task
+    // Build step params
     let embed_type = EmbedVideoType::from(req.embed_subtitle_video_type.as_str());
     let max_word = if req.origin_language_word_one_line > 0 {
         req.origin_language_word_one_line
@@ -79,8 +108,8 @@ pub async fn start_task(
         enable_tts: req.tts == 1,
         tts_voice_code: req.tts_voice_code,
         voice_clone_audio_url: req.tts_voice_clone_src_file_url,
-        origin_language: req.origin_language,
-        target_language: req.target_lang,
+        origin_language,
+        target_language,
         user_ui_language: req.language,
         replace_words_map,
         bilingual_srt_file_path: String::new(),
@@ -92,34 +121,32 @@ pub async fn start_task(
         vertical_video_minor_title: req.vertical_minor_title,
         max_word_one_line: max_word,
         subtitle_infos: Vec::new(),
+        multi_track_audio: req.multi_track,
+        detected_language: String::new(),
     };
 
-    // Spawn async pipeline (will be wired in Phase 3)
+    // Snapshot state once before spawning — zero lock contention during pipeline
     let state_clone = state.clone();
-    let task_id_clone = task_id.clone();
+    let task_id_for_spawn = task_id.clone();
     tokio::spawn(async move {
-        let tid = task_id_clone;
+        let tid = task_id_for_spawn;
         if let Err(e) = run_pipeline(state_clone.clone(), step_param).await {
-            tracing::error!(task_id = %tid, "Pipeline failed: {e}");
+            cli_art::pipeline_failed(&tid, &e.to_string());
             state_clone.task_store.update(&tid, |t| {
                 t.set_failed(e.to_string());
             });
         }
     });
 
-    let resp = ApiResponse::success(StartTaskResponse {
-        task_id,
-    });
-    Json(serde_json::to_value(resp).unwrap())
+    ApiResponse::success(StartTaskResponse { task_id }).into_response()
 }
 
 pub async fn get_task(
     State(state): State<Arc<AppState>>,
     Query(req): Query<GetTaskRequest>,
-) -> Json<serde_json::Value> {
+) -> impl IntoResponse {
     let Some(task) = state.task_store.get(&req.task_id) else {
-        let resp = ApiResponse::<()>::error("Task not found");
-        return Json(serde_json::to_value(resp).unwrap());
+        return ApiResponse::<()>::error("Task not found").into_response();
     };
 
     let video_info = if !task.title.is_empty() || !task.description.is_empty() {
@@ -143,15 +170,15 @@ pub async fn get_task(
         })
         .collect();
 
-    let resp = ApiResponse::success(GetTaskResponse {
+    ApiResponse::success(GetTaskResponse {
         task_id: task.task_id.clone(),
         process_percent: task.process_pct,
         video_info,
         subtitle_info,
         target_language: task.target_language.clone(),
         speech_download_url: task.speech_download_url.clone(),
-    });
-    Json(serde_json::to_value(resp).unwrap())
+    })
+    .into_response()
 }
 
 /// Run the full dubbing pipeline
@@ -161,54 +188,66 @@ async fn run_pipeline(
 ) -> anyhow::Result<()> {
     let task_id = param.task_id.clone();
 
+    // Snapshot config and bins once — zero lock contention during pipeline
+    let config = state.config.read().await.clone();
+    let bins = state.bin_paths.read().await.clone();
+    let service = state.service.read().await;
+    let transcriber = service.transcriber.clone();
+    let chat_completer = service.chat_completer.clone();
+    let tts_client = service.tts_client.clone();
+    drop(service);
+
     state.task_store.update(&task_id, |t| t.set_progress(3));
 
     // Step 1: Download/extract audio
-    {
-        let bins = state.bin_paths.read().await;
-        let config = state.config.read().await;
-        crate::service::link_to_file::link_to_file(&bins, &mut param, &config.app.proxy).await?;
-    }
+    cli_art::step_download_start(&param.link);
+    crate::service::link_to_file::link_to_file(&bins, &mut param, &config.app.proxy).await?;
+    cli_art::step_download_done();
     state.task_store.update(&task_id, |t| t.set_progress(10));
 
-    // Step 2: Transcribe + translate → SRT
-    {
-        let bins = state.bin_paths.read().await;
-        let config = state.config.read().await;
-        let service = state.service.read().await;
-        crate::service::audio_to_subtitle::audio_to_subtitle(
-            &bins,
-            &config,
-            &service.transcriber,
-            &service.chat_completer,
-            &mut param,
-        )
-        .await?;
-    }
-    state.task_store.update(&task_id, |t| t.set_progress(90));
+    // Step 2: Transcribe + translate → SRT (with auto language detection)
+    cli_art::step_transcribe_start(config.transcribe.provider.as_str(), &param.origin_language);
+    crate::service::audio_to_subtitle::audio_to_subtitle(
+        &bins,
+        &config,
+        &transcriber,
+        &chat_completer,
+        &mut param,
+    )
+    .await?;
+    state.task_store.update(&task_id, |t| {
+        t.set_progress(90);
+        // Update detected language info on the task
+        if !param.detected_language.is_empty() {
+            t.origin_language = param.origin_language.clone();
+            t.target_language = param.target_language.clone();
+        }
+    });
 
     // Step 3: TTS dubbing
-    {
-        let bins = state.bin_paths.read().await;
-        let service = state.service.read().await;
-        crate::service::srt_to_speech::srt_to_speech(
-            &bins,
-            &service.tts_client,
-            &mut param,
-        )
-        .await?;
+    if param.enable_tts {
+        cli_art::step_tts_start(config.tts.provider.as_str(), &param.tts_voice_code);
     }
+    crate::service::srt_to_speech::srt_to_speech(
+        &bins,
+        &config,
+        &tts_client,
+        &mut param,
+    )
+    .await?;
     state.task_store.update(&task_id, |t| t.set_progress(95));
 
     // Step 4: Embed subtitles into video
-    {
-        let bins = state.bin_paths.read().await;
-        crate::service::srt_embed::embed_subtitles(&bins, &mut param).await?;
+    if param.embed_subtitle_video_type != crate::types::task::EmbedVideoType::None {
+        cli_art::step_embed_start(&format!("{:?}", param.embed_subtitle_video_type));
     }
+    crate::service::srt_embed::embed_subtitles(&bins, &mut param).await?;
     state.task_store.update(&task_id, |t| t.set_progress(98));
 
     // Step 5: Finalize
+    cli_art::step_finalize_start();
     crate::service::upload_subtitles::upload_subtitles(&mut param).await?;
+    cli_art::step_finalize_done(param.subtitle_infos.len());
 
     // Update task with final results
     state.task_store.update(&task_id, |t| {
@@ -216,8 +255,8 @@ async fn run_pipeline(
         t.speech_download_url = param.tts_result_file_path.clone();
         t.set_success();
     });
-    tracing::info!(task_id = %task_id, "Pipeline completed successfully");
 
+    cli_art::pipeline_success(&task_id);
     Ok(())
 }
 

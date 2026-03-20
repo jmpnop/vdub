@@ -16,6 +16,7 @@ pub struct AliyunAsrClient {
 #[derive(Debug, Deserialize)]
 struct AsrTaskResult {
     #[serde(rename = "StatusText")]
+    #[allow(dead_code)]
     status_text: Option<String>,
     #[serde(rename = "Result")]
     result: Option<AsrResult>,
@@ -34,8 +35,10 @@ struct AsrSentence {
     #[serde(rename = "Text")]
     text: String,
     #[serde(rename = "BeginTime")]
+    #[allow(dead_code)]
     begin_time: f64,
     #[serde(rename = "EndTime")]
+    #[allow(dead_code)]
     end_time: f64,
 }
 
@@ -75,7 +78,7 @@ impl Transcriber for AliyunAsrClient {
         &self,
         audio_file: &Path,
         _language: &str,
-        work_dir: &Path,
+        _work_dir: &Path,
     ) -> anyhow::Result<TranscriptionData> {
         // Step 1: Convert audio to mono 16kHz
         let mono = crate::util::audio::process_audio("ffmpeg", audio_file).await?;

@@ -1,3 +1,5 @@
+use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde::{Deserialize, Serialize};
 
 /// API response wrapper — matches Go's response.Response
@@ -44,6 +46,13 @@ impl ApiResponse<()> {
     }
 }
 
+/// Implement IntoResponse so handlers can return ApiResponse directly
+impl<T: Serialize> IntoResponse for ApiResponse<T> {
+    fn into_response(self) -> Response {
+        Json(self).into_response()
+    }
+}
+
 // --- Subtitle Task DTOs ---
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +87,12 @@ pub struct StartTaskRequest {
     pub vertical_minor_title: String,
     #[serde(default)]
     pub origin_language_word_one_line: usize,
+    /// When true, add dubbed audio as a second track instead of replacing
+    #[serde(default = "default_true")]
+    pub multi_track: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Serialize)]
 pub struct StartTaskResponse {
