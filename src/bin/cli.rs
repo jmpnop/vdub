@@ -56,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    cli_art::print_dragon();
+    cli_art::print_skull();
 
     let config = Config::load()?;
     let venv_bin = vdub::util::deps::ensure_dependencies(&config).await?;

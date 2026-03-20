@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    cli_art::print_dragon();
+    cli_art::print_skull();
 
     let config = Config::load()?;
     let addr = format!("{}:{}", config.server.host, config.server.port);

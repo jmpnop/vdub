@@ -1,202 +1,43 @@
-# vdub — Logo Options
+# vdub — Logo Options (Disney/Pixar Coco Style)
 
-Pick a startup art and a banner. These replace `STARTUP_ART` and `BANNER` in `src/util/cli_art.rs`.
+## Source: Coco-style sugar skull (colorful floral)
 
----
+The Pixar Coco skull — flowers, butterflies, guitars, candles forming a skull shape. Vibrant colors on dark background.
 
-## Startup Art (shown on every run)
+### Original (white bg)
 
-### S1. Audio Waveform (current)
+<img src="file:///Users/pasha/RustRoverProjects/vdub/docs/coco_clean.png" width="500">
 
-```
-        ╭─────────────────────────╮
-        │         ╻               │
-        │    ╻    ┃    ╻          │
-        │ ╻  ┃  ╻ ┃ ╻  ┃  ╻      │
-        │ ┃  ┃  ┃ ┃ ┃  ┃  ┃      │
-        │ ┃  ┃  ┃ ┃ ┃  ┃  ┃  ╻   │
-        │╺┻━━┻━━┻━┻━┻━━┻━━┻━━┻╸  │
-        │     v d u b             │
-        ╰─────────────────────────╯
-```
+### Terminal render (dark bg, truecolor half-blocks)
 
-### S2. Stereo Waveform
+<img src="file:///Users/pasha/RustRoverProjects/vdub/docs/coco_dark.png" width="500">
 
-```
-              ▁▂▃▅▆▇▆▅▃▂▁
-          ▁▃▆████████████▆▃▁
-        ▂▆██████████████████▆▂
-        ▔▀██████████████████▀▔
-          ▔▀▃████████████▃▀▔
-              ▔▀▃▂▁▂▃▀▔
-
-              v  d  u  b
-```
-
-### S3. Minimal Equalizer
-
-```
-     ▁ ▂ ▃ ▅ ▇ █ ▇ ▅ ▃ ▂ ▁
-     █ █ █ █ █ █ █ █ █ █ █
-     █ █ █ █ █ █ █ █ █ █ █
-     ▀ ▀ ▀ ▀ ▀ ▀ ▀ ▀ ▀ ▀ ▀
-            v d u b
-```
-
-### S4. Speaker Cone
-
-```
-            .---.
-           /     \
-          |  (●)  |
-           \     /  ))))
-            '---'  ))))
-                  ))))
-          v d u b
-```
-
-### S5. Film Strip
-
-```
-     ┌─┬──────────────┬─┐
-     │○│              │○│
-     │○│    V D U B   │○│
-     │○│              │○│
-     │○│  dub  any    │○│
-     │○│   video      │○│
-     │○│              │○│
-     └─┴──────────────┴─┘
-```
-
-### S6. Microphone
-
-```
-           ╭━━━╮
-           ┃ ░░ ┃
-           ┃ ░░ ┃
-           ┃ ░░ ┃
-           ╰━┳━╯
-             ┃
-           ╭━┻━╮
-           ╰───╯
-         v d u b
-```
-
-### S7. Two Speech Bubbles (translation)
-
-```
-      ╭──────────╮
-      │  Hello!   │    ╭──────────╮
-      ╰────┬─────╯    │ Привет!  │
-           ╰───>      ╰────┬─────╯
-                           │
-               v d u b
-```
-
-### S8. Headphones
-
-```
-          ╭━━━━━━━╮
-        ╭─╯       ╰─╮
-       ╭╯             ╰╮
-       ┃               ┃
-      ╭┻╮             ╭┻╮
-      ┃▓┃             ┃▓┃
-      ╰━╯             ╰━╯
-          v  d  u  b
-```
-
-### S9. Clean Box
-
-```
-     ┌────────────────────┐
-     │  ▸ ▸ ▸  vdub  ◂ ◂ ◂ │
-     │                      │
-     │  dub any video       │
-     │  rust + mlx          │
-     └────────────────────┘
-```
-
-### S10. No Art (text only)
-
-```
-     vdub — video dubbing engine
-```
+Available sizes: 50 cols (23 rows), 40 cols (18 rows), 35 cols (15 rows)
 
 ---
 
-## Banner (shown in server mode)
+## Source: Doodle sugar skull set
 
-### B1. Block Letters (current)
+Hand-drawn style, simpler shapes. Could pick one and colorize it.
 
-```
-    ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-    ┃                                   ┃
-    ┃   ██╗   ██╗██████╗ ██╗   ██╗██████╗  ┃
-    ┃   ██║   ██║██╔══██╗██║   ██║██╔══██╗ ┃
-    ┃   ██║   ██║██║  ██║██║   ██║██████╔╝ ┃
-    ┃   ╚██╗ ██╔╝██║  ██║██║   ██║██╔══██╗ ┃
-    ┃    ╚████╔╝ ██████╔╝╚██████╔╝██████╔╝ ┃
-    ┃     ╚═══╝  ╚═════╝  ╚═════╝ ╚═════╝  ┃
-    ┃                                   ┃
-    ┃      🎬  Video Dubbing Engine  🎬     ┃
-    ┃         ⚡ Rust + MLX ⚡              ┃
-    ┃                                   ┃
-    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
-
-### B2. Thin & Wide
-
-```
-    ═══════════════════════════════════════
-      ╻ ╻╺┳╸┏━╸   ╺┳╸┏━┓   ╺┳╸╺┳╸┏━┓
-      ┃┏┛  ┃ ┃  ╻   ┃ ┃ ┃    ┃  ┃ ┣━┛
-      ┗╹   ╹ ┗━╸    ╹ ┗━┛    ╹  ╹ ╹
-    ─────────────────────────────────────
-            video dubbing engine
-    ═══════════════════════════════════════
-```
-
-### B3. Minimal
-
-```
-    ────────────────────────────────
-        vdub · video dubbing engine
-        rust + mlx · free & local
-    ────────────────────────────────
-```
-
-### B4. Retro Terminal
-
-```
-    ╔══════════════════════════════════╗
-    ║  > vdub v0.1                     ║
-    ║  > video dubbing engine          ║
-    ║  > rust + mlx | free & local     ║
-    ║  > ready.                        ║
-    ╚══════════════════════════════════╝
-```
-
-### B5. Double Line with Emoji
-
-```
-    ╔══════════════════════════════════════════╗
-    ║                                          ║
-    ║     🎬  vdub — video dubbing engine      ║
-    ║     🔊  free ASR + TTS, all local        ║
-    ║     ⚡  rust + mlx on apple silicon      ║
-    ║                                          ║
-    ╚══════════════════════════════════════════╝
-```
+<img src="file:///Users/pasha/RustRoverProjects/vdub/docs/doodle_skulls.png" width="600">
 
 ---
 
-## Recommended Combos
+## Generated: PIL pixel art skull
 
-| Style | Startup | Banner | Vibe |
-|-------|---------|--------|------|
-| Polished | S8 (Headphones) | B1 (Block Letters) | Professional, impressive |
-| Hacker | S10 (Text only) | B4 (Retro Terminal) | Clean, fast, no fluff |
-| Creative | S7 (Speech Bubbles) | B5 (Double Line) | Friendly, descriptive |
-| Minimal | S10 (Text only) | B3 (Minimal) | Unix philosophy |
-| Audio nerd | S3 (Equalizer) | B2 (Thin & Wide) | Studio vibes |
+Programmatic sugar skull with flower crown, petal-ringed eyes, heart nose, teeth.
+
+<img src="file:///Users/pasha/RustRoverProjects/vdub/docs/catrina_large.png" width="500">
+
+---
+
+## Preview in terminal
+
+```bash
+# Coco skull (best — colorful, Pixar style)
+chafa --format=symbols --size=40 --symbols=half /tmp/coco_dark.png
+
+# Generated pixel art skull
+python3 scripts/gen_catrina_v3.py --combo
+```
