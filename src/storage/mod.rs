@@ -18,23 +18,23 @@ pub struct BinPaths {
 }
 
 impl BinPaths {
-    /// Try to locate tools on PATH, fall back to ./bin/
-    pub fn detect() -> Self {
+    /// Try to locate tools — checks venv/bin first, then ./bin/, then PATH
+    pub fn detect_with_venv(venv_bin: Option<&Path>) -> Self {
         use crate::util::cli_art;
 
         cli_art::print_tool_scan();
 
         let bins = Self {
-            ffmpeg: which("ffmpeg"),
-            ffprobe: which("ffprobe"),
-            ytdlp: which("yt-dlp"),
-            fasterwhisper: which("fasterwhisper"),
-            whisperx: which("whisperx"),
-            whisperkit: which("whisperkit"),
-            whispercpp: which("whisper-cpp"),
-            edge_tts: which("edge-tts"),
-            mlx_whisper: which("mlx_whisper"),
-            mlx_audio: which("python3"), // mlx-audio runs via python3 -m
+            ffmpeg: which("ffmpeg", venv_bin),
+            ffprobe: which("ffprobe", venv_bin),
+            ytdlp: which("yt-dlp", venv_bin),
+            fasterwhisper: which("fasterwhisper", venv_bin),
+            whisperx: which("whisperx", venv_bin),
+            whisperkit: which_any(&["whisperkit-cli", "whisperkit"], venv_bin),
+            whispercpp: which("whisper-cpp", venv_bin),
+            edge_tts: which("edge-tts", venv_bin),
+            mlx_whisper: which("mlx_whisper", venv_bin),
+            mlx_audio: which_any(&["mlx_audio", "python3"], venv_bin),
         };
 
         // Report what we found
@@ -54,6 +54,11 @@ impl BinPaths {
         }
 
         bins
+    }
+
+    /// Detect without venv (legacy)
+    pub fn detect() -> Self {
+        Self::detect_with_venv(None)
     }
 
     /// Validate that required tools exist. Returns warnings for missing optional tools.
@@ -77,14 +82,31 @@ impl BinPaths {
     }
 }
 
-fn which(name: &str) -> String {
-    // Check ./bin/ first, then PATH
+fn which(name: &str, venv_bin: Option<&Path>) -> String {
+    // Check venv/bin first
+    if let Some(vbin) = venv_bin {
+        let venv_path = vbin.join(name);
+        if venv_path.exists() {
+            return venv_path.to_string_lossy().to_string();
+        }
+    }
+    // Check ./bin/
     let local = format!("./bin/{name}");
     if Path::new(&local).exists() {
         return local;
     }
     // Fall back to bare name (relies on PATH)
     name.to_string()
+}
+
+fn which_any(names: &[&str], venv_bin: Option<&Path>) -> String {
+    for name in names {
+        let path = which(name, venv_bin);
+        if Path::new(&path).exists() || which_system(&path).is_some() {
+            return path;
+        }
+    }
+    names[0].to_string()
 }
 
 fn which_system(name: &str) -> Option<PathBuf> {

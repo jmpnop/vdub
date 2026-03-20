@@ -26,8 +26,11 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load()?;
     let addr = format!("{}:{}", config.server.host, config.server.port);
 
-    // Detect external tool paths
-    let bin_paths = BinPaths::detect();
+    // Ensure all dependencies are installed (Homebrew + pip packages)
+    let venv_bin = krillin_rs::util::deps::ensure_dependencies(&config).await?;
+
+    // Detect external tool paths (checks venv/bin first, then ./bin/, then PATH)
+    let bin_paths = BinPaths::detect_with_venv(venv_bin.as_deref());
 
     // Validate tools
     let warnings = bin_paths.validate();
