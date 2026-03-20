@@ -1,1 +1,4 @@
-// Local CLI-based providers — will be implemented in Phase 7
+pub mod edge_tts;
+pub mod fasterwhisper;
+pub mod whispercpp;
+pub mod whisperkit;

@@ -809,6 +809,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "hmac",
+ "mime_guess",
  "rand 0.8.5",
  "regex",
  "reqwest",

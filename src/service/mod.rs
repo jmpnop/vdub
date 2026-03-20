@@ -7,8 +7,13 @@ pub mod split_audio;
 pub mod timestamps;
 
 use crate::config::Config;
+use crate::provider::local::edge_tts::EdgeTtsClient;
+use crate::provider::local::fasterwhisper::FasterWhisperProcessor;
+use crate::provider::local::whispercpp::WhisperCppProcessor;
+use crate::provider::local::whisperkit::WhisperKitProcessor;
 use crate::provider::openai::OpenAiClient;
 use crate::provider::{ChatCompleter, Transcriber, Ttser};
+use crate::storage::BinPaths;
 use std::sync::Arc;
 
 pub struct Service {
@@ -19,6 +24,10 @@ pub struct Service {
 
 impl Service {
     pub fn from_config(config: &Config) -> Self {
+        Self::from_config_with_bins(config, &BinPaths::detect())
+    }
+
+    pub fn from_config_with_bins(config: &Config, bins: &BinPaths) -> Self {
         let proxy = if config.app.proxy.is_empty() {
             None
         } else {
@@ -27,7 +36,21 @@ impl Service {
 
         // Transcriber
         let transcriber: Arc<dyn Transcriber> = match config.transcribe.provider.as_str() {
-            "openai" | _ => Arc::new(OpenAiClient::new(
+            "fasterwhisper" => Arc::new(FasterWhisperProcessor::new(
+                &bins.fasterwhisper,
+                &config.transcribe.fasterwhisper.model,
+                config.transcribe.enable_gpu_acceleration,
+            )),
+            "whispercpp" => Arc::new(WhisperCppProcessor::new(
+                &bins.whispercpp,
+                &config.transcribe.whispercpp.model,
+            )),
+            "whisperkit" => Arc::new(WhisperKitProcessor::new(
+                &bins.whisperkit,
+                &config.transcribe.whisperkit.model,
+            )),
+            // "openai" and default
+            _ => Arc::new(OpenAiClient::new(
                 &config.transcribe.openai.base_url,
                 if config.transcribe.openai.api_key.is_empty() {
                     &config.llm.api_key
@@ -49,7 +72,9 @@ impl Service {
 
         // TTS
         let tts_client: Arc<dyn Ttser> = match config.tts.provider.as_str() {
-            "openai" | _ => Arc::new(OpenAiClient::new(
+            "edge-tts" => Arc::new(EdgeTtsClient::new(&bins.edge_tts)),
+            // "openai" and default
+            _ => Arc::new(OpenAiClient::new(
                 &config.tts.openai.base_url,
                 if config.tts.openai.api_key.is_empty() {
                     &config.llm.api_key
