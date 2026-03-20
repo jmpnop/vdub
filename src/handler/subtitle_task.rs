@@ -154,23 +154,68 @@ pub async fn get_task(
     Json(serde_json::to_value(resp).unwrap())
 }
 
-/// Run the full dubbing pipeline (steps wired incrementally in later phases)
+/// Run the full dubbing pipeline
 async fn run_pipeline(
     state: Arc<AppState>,
-    param: crate::types::task::StepParam,
+    mut param: crate::types::task::StepParam,
 ) -> anyhow::Result<()> {
     let task_id = param.task_id.clone();
-    let _ = &param; // will be used in later phases
 
     state.task_store.update(&task_id, |t| t.set_progress(3));
 
-    // Step 1: link_to_file (Phase 3)
-    // Step 2: audio_to_subtitle (Phase 4)
-    // Step 3: srt_to_speech (Phase 5)
-    // Step 4: embed_subtitles (Phase 6)
-    // Step 5: upload_subtitles (Phase 6)
+    // Step 1: Download/extract audio
+    {
+        let bins = state.bin_paths.read().await;
+        let config = state.config.read().await;
+        crate::service::link_to_file::link_to_file(&bins, &mut param, &config.app.proxy).await?;
+    }
+    state.task_store.update(&task_id, |t| t.set_progress(10));
 
-    state.task_store.update(&task_id, |t| t.set_success());
+    // Step 2: Transcribe + translate → SRT
+    {
+        let bins = state.bin_paths.read().await;
+        let config = state.config.read().await;
+        let service = state.service.read().await;
+        crate::service::audio_to_subtitle::audio_to_subtitle(
+            &bins,
+            &config,
+            &service.transcriber,
+            &service.chat_completer,
+            &mut param,
+        )
+        .await?;
+    }
+    state.task_store.update(&task_id, |t| t.set_progress(90));
+
+    // Step 3: TTS dubbing
+    {
+        let bins = state.bin_paths.read().await;
+        let service = state.service.read().await;
+        crate::service::srt_to_speech::srt_to_speech(
+            &bins,
+            &service.tts_client,
+            &mut param,
+        )
+        .await?;
+    }
+    state.task_store.update(&task_id, |t| t.set_progress(95));
+
+    // Step 4: Embed subtitles into video
+    {
+        let bins = state.bin_paths.read().await;
+        crate::service::srt_embed::embed_subtitles(&bins, &mut param).await?;
+    }
+    state.task_store.update(&task_id, |t| t.set_progress(98));
+
+    // Step 5: Finalize
+    crate::service::upload_subtitles::upload_subtitles(&mut param).await?;
+
+    // Update task with final results
+    state.task_store.update(&task_id, |t| {
+        t.subtitle_infos = param.subtitle_infos.clone();
+        t.speech_download_url = param.tts_result_file_path.clone();
+        t.set_success();
+    });
     tracing::info!(task_id = %task_id, "Pipeline completed successfully");
 
     Ok(())
