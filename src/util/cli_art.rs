@@ -33,6 +33,61 @@ pub fn print_skull() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Pipeline plan summary
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+pub fn pipeline_plan(
+    param: &crate::types::task::StepParam,
+    transcribe_provider: &str,
+    tts_provider: &str,
+) {
+    use crate::types::task::{EmbedVideoType, SubtitleResultType};
+
+    tracing::info!("🎯 ═══════════════════════════════════════════════");
+    tracing::info!("🎯  Pipeline Plan");
+    tracing::info!("🎯 ═══════════════════════════════════════════════");
+
+    // Language
+    let from = if param.origin_language == "auto" { "auto-detect" } else { lang_display_name(&param.origin_language) };
+    let to = if param.target_language == "auto" { "auto-select" } else { lang_display_name(&param.target_language) };
+    tracing::info!("   🌍 Language:   {from} → {to}");
+
+    // Subtitles
+    let sub_type = match param.subtitle_result_type {
+        SubtitleResultType::BilingualTranslationOnTop | SubtitleResultType::BilingualTranslationOnBottom => "bilingual",
+        SubtitleResultType::TargetOnly => "target language only",
+        SubtitleResultType::OriginOnly => "original language only",
+    };
+    tracing::info!("   📝 Subtitles:  {sub_type}");
+
+    // ASR
+    tracing::info!("   🧠 ASR:        {transcribe_provider}");
+
+    // TTS / Audio
+    if param.enable_tts {
+        tracing::info!("   🔊 TTS:        {tts_provider} (voice: {})", param.tts_voice_code);
+        if param.multi_track_audio {
+            tracing::info!("   🎵 Audio:      dual-track (original + dubbed)");
+        } else {
+            tracing::info!("   🎵 Audio:      single-track (dubbed replaces original)");
+        }
+    } else {
+        tracing::info!("   🔊 TTS:        disabled");
+    }
+
+    // Video embed
+    let embed = match param.embed_subtitle_video_type {
+        EmbedVideoType::Horizontal => "horizontal",
+        EmbedVideoType::Vertical => "vertical",
+        EmbedVideoType::All => "horizontal + vertical",
+        EmbedVideoType::None => "disabled",
+    };
+    tracing::info!("   🎞️  Embed:      {embed}");
+    tracing::info!("   📁 Output:     {}/output", param.task_base_path);
+    tracing::info!("🎯 ═══════════════════════════════════════════════");
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Pipeline step progress emojis
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

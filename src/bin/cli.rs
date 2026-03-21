@@ -5,6 +5,8 @@ use vdub::storage::BinPaths;
 use vdub::types::task::{EmbedVideoType, StepParam, SubtitleResultType};
 use vdub::util::cli_art;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// vdub — dub any video from the command line
 #[derive(Parser)]
@@ -50,10 +52,23 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+    // Set up logging: stderr + log file
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let log_dir = std::path::Path::new("./logs");
+    std::fs::create_dir_all(log_dir)?;
+    let log_file = std::fs::File::create(log_dir.join("vdub.log"))?;
+
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr);
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(std::sync::Mutex::new(log_file));
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stderr_layer)
+        .with(file_layer)
         .init();
 
     cli_art::print_skull();
@@ -66,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("{w}");
     }
 
+    tracing::info!("📋 Log file: logs/vdub.log");
     let service = Service::from_config_with_bins(&config, &bins);
 
     // Build params from CLI flags
@@ -133,6 +149,9 @@ async fn main() -> anyhow::Result<()> {
         multi_track_audio: !cli.replace_audio,
         detected_language: String::new(),
     };
+
+    // Show pipeline plan
+    cli_art::pipeline_plan(&param, config.transcribe.provider.as_str(), config.tts.provider.as_str());
 
     // Run pipeline
     cli_art::step_download_start(&param.link);
