@@ -95,6 +95,11 @@ pub async fn srt_to_speech(
             // Add as second audio track with language metadata
             let orig_lang = cli_art::lang_to_iso639_2(&param.origin_language);
             let target_lang = cli_art::lang_to_iso639_2(&param.target_language);
+            tracing::info!(
+                "   🔊 Adding audio track: {} ({}) → {} ({})",
+                cli_art::lang_display_name(&param.origin_language), orig_lang,
+                cli_art::lang_display_name(&param.target_language), target_lang,
+            );
             crate::util::video::add_audio_track(
                 &bins.ffmpeg,
                 Path::new(&param.input_video_path),
@@ -104,9 +109,12 @@ pub async fn srt_to_speech(
                 target_lang,
             )
             .await?;
-            tracing::info!("   🎬 Multi-track video created (original + dubbed audio)");
+            tracing::info!("   🎬 Multi-track video: track 0 = {} (original), track 1 = {} (dubbed)", orig_lang, target_lang);
         } else {
-            // Replace audio track entirely
+            tracing::info!(
+                "   🔊 Replacing audio track with {} dubbed audio",
+                cli_art::lang_display_name(&param.target_language),
+            );
             crate::util::video::replace_audio(
                 &bins.ffmpeg,
                 Path::new(&param.input_video_path),

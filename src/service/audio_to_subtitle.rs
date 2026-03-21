@@ -9,6 +9,7 @@ use crate::util::cli_art;
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -51,6 +52,7 @@ pub async fn audio_to_subtitle(
     // Phase 1: Split and transcribe using JoinSet
     let mut transcription_results: Vec<(usize, TranscriptionData, f64)> = Vec::with_capacity(num_segments);
 
+    let completed = Arc::new(AtomicUsize::new(0));
     let mut join_set = JoinSet::new();
     for i in 0..num_segments {
         let start = split_points[i];
@@ -63,6 +65,7 @@ pub async fn audio_to_subtitle(
         let lang = asr_language.clone();
         let base_path = param.task_base_path.clone();
         let total = num_segments;
+        let completed = completed.clone();
 
         join_set.spawn(async move {
             // Split
@@ -77,7 +80,6 @@ pub async fn audio_to_subtitle(
 
             // Transcribe with retry
             let _permit = sem.acquire().await?;
-            cli_art::step_transcribe_segment(i, total);
 
             let mut last_err = None;
             for attempt in 0..max_attempts.max(1) {
@@ -95,6 +97,8 @@ pub async fn audio_to_subtitle(
                         if let Ok(json) = serde_json::to_string_pretty(&data) {
                             let _ = tokio::fs::write(&json_path, json).await;
                         }
+                        let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                        cli_art::step_transcribe_segment(done - 1, total);
                         return Ok::<_, anyhow::Error>((i, data, start));
                     }
                     Err(e) => {

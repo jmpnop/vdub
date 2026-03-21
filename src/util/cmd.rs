@@ -1,3 +1,4 @@
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use std::process::Stdio;
 
@@ -32,6 +33,37 @@ pub async fn run_cmd_status(program: &str, args: &[&str]) -> anyhow::Result<()> 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("{program}: {stderr}");
+    }
+
+    Ok(())
+}
+
+/// Run an external command, streaming stderr and calling `on_line` for each line.
+/// Used to parse progress output from tools like yt-dlp.
+pub async fn run_cmd_with_progress<F>(
+    program: &str,
+    args: &[&str],
+    mut on_line: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(&str),
+{
+    let mut child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stderr = child.stderr.take().unwrap();
+    let mut reader = BufReader::new(stderr).lines();
+
+    while let Some(line) = reader.next_line().await? {
+        on_line(&line);
+    }
+
+    let status = child.wait().await?;
+    if !status.success() {
+        anyhow::bail!("{program} exited with {status}");
     }
 
     Ok(())

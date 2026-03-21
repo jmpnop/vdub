@@ -34,14 +34,31 @@ pub async fn embed_subtitles(
     let srt_content = tokio::fs::read_to_string(&param.bilingual_srt_file_path).await?;
     let subtitles = parse_srt(&srt_content);
 
+    let sub_desc = match param.subtitle_result_type {
+        SubtitleResultType::BilingualTranslationOnTop | SubtitleResultType::BilingualTranslationOnBottom => {
+            format!("bilingual {} ↔ {}",
+                cli_art::lang_display_name(&param.origin_language),
+                cli_art::lang_display_name(&param.target_language))
+        }
+        SubtitleResultType::TargetOnly => {
+            format!("{} only", cli_art::lang_display_name(&param.target_language))
+        }
+        SubtitleResultType::OriginOnly => {
+            format!("{} only", cli_art::lang_display_name(&param.origin_language))
+        }
+    };
+
     match param.embed_subtitle_video_type {
         EmbedVideoType::Horizontal => {
+            tracing::info!("   📝 Burning {sub_desc} subtitles into horizontal video ({} blocks)", subtitles.len());
             embed_horizontal(bins, param, video_source, &subtitles).await?;
         }
         EmbedVideoType::Vertical => {
+            tracing::info!("   📝 Burning {sub_desc} subtitles into vertical video ({} blocks)", subtitles.len());
             embed_vertical(bins, param, video_source, &subtitles).await?;
         }
         EmbedVideoType::All => {
+            tracing::info!("   📝 Burning {sub_desc} subtitles into horizontal + vertical videos ({} blocks)", subtitles.len());
             embed_horizontal(bins, param, video_source, &subtitles).await?;
             embed_vertical(bins, param, video_source, &subtitles).await?;
         }

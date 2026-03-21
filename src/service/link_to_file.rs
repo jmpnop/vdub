@@ -42,6 +42,12 @@ pub async fn link_to_file(bins: &BinPaths, param: &mut StepParam, proxy: &str) -
             }
             if let Some(lang) = meta["language"].as_str() {
                 tracing::info!("   🌍 Video language: {lang}");
+                // Use detected language if origin_language is "auto"
+                if param.origin_language == "auto" && !lang.is_empty() {
+                    // Normalize "en-US" → "en", "zh-CN" → "zh_cn", etc.
+                    let normalized = lang.split('-').next().unwrap_or(lang).to_lowercase();
+                    param.origin_language = normalized;
+                }
             }
         }
 
@@ -76,6 +82,7 @@ pub async fn link_to_file(bins: &BinPaths, param: &mut StepParam, proxy: &str) -
                 "--merge-output-format", "mp4",
                 "--no-playlist",
                 "--restrict-filenames",
+                "--newline",
                 "-o", &video_path,
             ];
 
@@ -88,7 +95,23 @@ pub async fn link_to_file(bins: &BinPaths, param: &mut StepParam, proxy: &str) -
 
             video_args.push(&param.link);
 
-            match cmd::run_cmd_status(&bins.ytdlp, &video_args).await {
+            let result = cmd::run_cmd_with_progress(
+                &bins.ytdlp,
+                &video_args,
+                |line| {
+                    if let Some(pct) = parse_ytdlp_progress(line) {
+                        let filled = (pct as usize * 20) / 100;
+                        let empty = 20 - filled;
+                        let bar = format!("{}{}",
+                            "█".repeat(filled),
+                            "░".repeat(empty),
+                        );
+                        tracing::info!("   📥 Downloading: {pct:5.1}% {bar}");
+                    }
+                },
+            ).await;
+
+            match result {
                 Ok(()) => {
                     param.input_video_path = video_path;
                 }
@@ -166,4 +189,18 @@ async fn download_subtitles(
             tracing::debug!("   ℹ️  No subtitles available from source");
         }
     }
+}
+
+/// Parse yt-dlp progress line like `[download]  45.2% of 50.00MiB at 2.50MiB/s ETA 00:11`
+fn parse_ytdlp_progress(line: &str) -> Option<f32> {
+    let line = line.trim();
+    if !line.starts_with("[download]") {
+        return None;
+    }
+    let rest = line.strip_prefix("[download]")?.trim();
+    if !rest.contains('%') {
+        return None;
+    }
+    let pct_str = rest.split('%').next()?.trim();
+    pct_str.parse::<f32>().ok()
 }
